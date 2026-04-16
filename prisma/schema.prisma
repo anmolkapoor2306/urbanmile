@@ -27,19 +27,20 @@ enum BookingType {
 }
 
 model Booking {
-  id          String   @id @default(uuid())
-  bookingType BookingType @default(PERSONAL)
-  fullName    String
-  email       String
-  phone       String
-  pickupLocation  String
-  dropoffLocation String
-  pickupDateTime DateTime
-  carType     CarType  @default(SEDAN)
+  id                String   @id @default(uuid())
+  bookingReference  String   @unique @default("UM-GENERATED")
+  bookingType       BookingType @default(PERSONAL)
+  fullName          String
+  email             String
+  phone             String
+  pickupLocation    String
+  dropoffLocation   String
+  pickupDateTime    DateTime
+  carType           CarType  @default(SEDAN)
   specialInstructions String?
-  status      BookingStatus @default(PENDING)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status            BookingStatus @default(PENDING)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([status])
   @@index([createdAt])

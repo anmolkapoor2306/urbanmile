@@ -30,10 +30,10 @@ export function Select({ label, options, value, onChange, error, fullWidth = fal
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className={cn(
-          'px-3 py-2.5 rounded-lg border transition-colors',
+          'w-full min-w-0 rounded-lg border px-3 py-2.5 text-base transition-colors',
           'bg-white dark:bg-zinc-800',
           'border-zinc-300 dark:border-zinc-700',
-          'focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent',
+          'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent',
           'disabled:opacity-50 disabled:cursor-not-allowed',
           error && 'border-red-500 focus:ring-red-500',
           'dark:text-white'

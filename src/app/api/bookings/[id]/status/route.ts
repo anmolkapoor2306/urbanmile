@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
+import { requireAdminAuth } from '@/lib/adminAuth';
 
 const statusUpdateSchema = z.object({
   status: z.enum(['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED']),
 });
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const error = requireAdminAuth(request);
+  if (error) return error;
+
   try {
     const { id } = await context.params;
     const body = await request.json();
@@ -38,16 +42,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({
       success: true,
       message: 'Booking status updated successfully',
-      data: {
-        id: booking.id,
-        fullName: booking.fullName,
-        email: booking.email,
-        phone: booking.phone,
-        pickupLocation: booking.pickupLocation,
-        dropoffLocation: booking.dropoffLocation,
-        pickupDateTime: booking.pickupDateTime.toISOString(),
-        carType: booking.carType,
-        specialInstructions: booking.specialInstructions,
+        data: {
+          id: booking.id,
+          fullName: booking.fullName,
+          email: booking.email,
+          phone: booking.phone,
+          pickupLocation: booking.pickupLocation,
+          dropoffLocation: booking.dropoffLocation,
+          pickupDateTime: booking.pickupDateTime.toISOString(),
+          carType: booking.carType,
+          specialInstructions: booking.specialInstructions,
         status: booking.status,
         createdAt: booking.createdAt.toISOString(),
         updatedAt: booking.updatedAt.toISOString(),

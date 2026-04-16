@@ -1,93 +1,59 @@
 'use client';
 
-import { useRef } from 'react';
-
-interface NavLink {
-  label: string;
-  href: string;
-  onClick?: () => void;
-}
+import Link from 'next/link';
+import { CONTACT_PHONE_HREF } from '@/lib/contact';
 
 export function Navbar() {
-  const bookingSectionRef = useRef<HTMLElement>(null);
-
-  const scrollToBooking = (type: 'PERSONAL' | 'BUSINESS') => {
-    bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-    // Store booking type preference in sessionStorage for form
-    sessionStorage.setItem('preferredBookingType', type);
-  };
-
-  const scrollToAbout = () => {
-    document.getElementById('about')?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const handleBusinessClick = () => {
-    scrollToBooking('BUSINESS');
-  };
-
-  const handlePersonalClick = () => {
-    scrollToBooking('PERSONAL');
-  };
-
-  const handleBookNowClick = () => {
-    bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-    // Get existing preference or default
-    const existingPriority = sessionStorage.getItem('preferredBookingType') || 'PERSONAL';
-    sessionStorage.setItem('preferredBookingType', existingPriority);
+  const scrollToSection = (sectionId: 'ride' | 'business' | 'about') => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
-    <nav className="bg-zinc-900 text-white border-b border-zinc-800 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <div className="flex-shrink-0">
-            <a href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-amber-500 rounded flex items-center justify-center">
-                <svg className="w-5 h-5 text-zinc-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <nav className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-900 text-white">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex min-h-16 items-center justify-between gap-4 py-3">
+          <div className="shrink-0">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded bg-amber-500">
+                <svg className="h-5 w-5 text-zinc-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
               <span className="text-lg font-bold tracking-tight">UrbanMile</span>
-            </a>
+            </Link>
           </div>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
+          <div className="hidden flex-1 items-center justify-center gap-8 md:flex">
             <button
-              onClick={handlePersonalClick}
-              className="text-zinc-300 hover:text-amber-500 transition-colors font-medium text-sm"
+              type="button"
+              onClick={() => scrollToSection('ride')}
+              className="text-sm font-medium text-zinc-300 transition-colors hover:text-amber-500"
             >
               Ride
             </button>
             <button
-              onClick={handleBusinessClick}
-              className="text-zinc-300 hover:text-amber-500 transition-colors font-medium text-sm"
+              type="button"
+              onClick={() => scrollToSection('business')}
+              className="text-sm font-medium text-zinc-300 transition-colors hover:text-amber-500"
             >
               Business
             </button>
             <button
-              onClick={scrollToAbout}
-              className="text-zinc-300 hover:text-amber-500 transition-colors font-medium text-sm"
+              type="button"
+              onClick={() => scrollToSection('about')}
+              className="text-sm font-medium text-zinc-300 transition-colors hover:text-amber-500"
             >
               About
             </button>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center space-x-4">
+          <div className="ml-auto hidden md:flex md:items-center">
             <a
-              href="tel:+919876543210"
-              className="hidden sm:inline-flex items-center px-4 py-2 border border-amber-500 text-amber-500 hover:bg-amber-500 hover:text-zinc-900 transition-colors font-medium text-sm rounded-lg"
+              href={CONTACT_PHONE_HREF}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-amber-500 px-4 py-2 text-sm font-medium text-amber-500 transition-colors hover:bg-amber-500 hover:text-zinc-900"
             >
               Call Now
             </a>
-            <button
-              onClick={handleBookNowClick}
-              className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-zinc-900 font-medium text-sm rounded-lg transition-colors"
-            >
-              Book Now
-            </button>
           </div>
         </div>
       </div>

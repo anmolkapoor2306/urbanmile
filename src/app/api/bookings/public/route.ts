@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAdminAuth } from '@/lib/adminAuth';
 import { z } from 'zod';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 
@@ -26,78 +25,7 @@ const bookingSchema = z.object({
   dropoffLocationSource: bookingLocationMetadataSchema.shape.source,
 });
 
-export async function GET(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
-
-  try {
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const limit = parseInt(searchParams.get('limit') || '100');
-
-    const where: { status?: string } = {};
-    if (status && ['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED'].includes(status)) {
-      where.status = status;
-    }
-
-    const bookings = await prisma.booking.findMany({
-      where: status ? { status: status as 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' } : {},
-      take: limit,
-      orderBy: { pickupDateTime: 'asc' },
-    });
-
-    return NextResponse.json(
-      {
-        success: true,
-        data: bookings.map((bookingRecord: {
-          id: string;
-          fullName: string;
-          email: string;
-          phone: string;
-          pickupLocation: string;
-          dropoffLocation: string;
-          pickupDateTime: Date;
-          carType: string;
-          specialInstructions: string | null;
-          status: string;
-          createdAt: Date;
-          updatedAt: Date;
-        }) => ({
-          id: bookingRecord.id,
-          bookingType: 'PERSONAL',
-          fullName: bookingRecord.fullName,
-          email: bookingRecord.email,
-          phone: bookingRecord.phone,
-          pickupLocation: bookingRecord.pickupLocation,
-          dropoffLocation: bookingRecord.dropoffLocation,
-          pickupDateTime: bookingRecord.pickupDateTime.toISOString(),
-          carType: bookingRecord.carType,
-          specialInstructions: bookingRecord.specialInstructions,
-          status: bookingRecord.status,
-          createdAt: bookingRecord.createdAt.toISOString(),
-          updatedAt: bookingRecord.updatedAt.toISOString(),
-          bookingReference: `UM-${bookingRecord.createdAt.toISOString().slice(0, 10).replace(/-/g, '')}-${bookingRecord.id.slice(0, 8)}`,
-        })),
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
-    );
-  } catch (error) {
-    console.error('Error fetching bookings:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch bookings' },
-      { status: 500 }
-    );
-  }
-}
-
 export async function POST(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
-
   try {
     const body = await request.json();
     const result = bookingSchema.safeParse(body);
@@ -121,7 +49,7 @@ export async function POST(request: NextRequest) {
       specialInstructions,
     } = result.data;
 
-    // Coordinates/place IDs are accepted now for a future DB migration.
+    // Accept future Google Maps metadata now so the request contract can stay stable.
     const booking = await prisma.booking.create({
       data: {
         bookingType,
@@ -167,5 +95,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-export const dynamic = 'force-dynamic';

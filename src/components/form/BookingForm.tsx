@@ -1,13 +1,17 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect, useRef } from 'react';
 import { z } from 'zod';
+import { cn } from '@/lib/utils';
+import {
+  bookingLocationMetadataSchema,
+  getLocationUpgradeHint,
+} from '@/lib/bookingLocation';
+import { useBookingLocationField } from '@/hooks/useBookingLocationField';
 import { Input } from './Input';
 import { Select } from './Select';
 import { Textarea } from './Textarea';
 import { Button } from './Button';
-
-type BookingType = 'PERSONAL' | 'BUSINESS';
 
 const carTypeOptions: { value: string; label: string }[] = [
   { value: 'SEDAN', label: 'Sedan' },
@@ -28,18 +32,31 @@ const bookingSchema = z.object({
     message: 'Please select a vehicle type',
   }),
   specialInstructions: z.string().optional(),
+  pickupLatitude: bookingLocationMetadataSchema.shape.latitude,
+  pickupLongitude: bookingLocationMetadataSchema.shape.longitude,
+  pickupPlaceId: bookingLocationMetadataSchema.shape.placeId,
+  pickupLocationSource: bookingLocationMetadataSchema.shape.source,
+  dropoffLatitude: bookingLocationMetadataSchema.shape.latitude,
+  dropoffLongitude: bookingLocationMetadataSchema.shape.longitude,
+  dropoffPlaceId: bookingLocationMetadataSchema.shape.placeId,
+  dropoffLocationSource: bookingLocationMetadataSchema.shape.source,
 });
 
 type BookingFormData = z.infer<typeof bookingSchema>;
 
 interface BookingFormProps {
-  defaultBookingType?: BookingType;
-  onSuccess?: (booking: BookingFormData) => void;
+  onBookingSuccess?: () => void;
+  onReset?: () => void;
 }
 
-export function BookingForm({ defaultBookingType = 'PERSONAL', onSuccess }: BookingFormProps) {
+export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
+  const confirmationRef = useRef<HTMLDivElement>(null);
+  const pickupDateTimeInputRef = useRef<HTMLInputElement>(null);
+  const pickupField = useBookingLocationField();
+  const dropoffField = useBookingLocationField();
+
   const [formData, setFormData] = useState<BookingFormData>({
-    bookingType: defaultBookingType,
+    bookingType: 'PERSONAL',
     fullName: '',
     email: '',
     phone: '',
@@ -48,23 +65,107 @@ export function BookingForm({ defaultBookingType = 'PERSONAL', onSuccess }: Book
     pickupDateTime: '',
     carType: 'SEDAN',
     specialInstructions: '',
+    pickupLatitude: null,
+    pickupLongitude: null,
+    pickupPlaceId: '',
+    pickupLocationSource: 'manual',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof BookingFormData, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
+  const [isLocatingPickup, setIsLocatingPickup] = useState(false);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    if (name === 'pickupLocation') {
+      pickupField.updateAddress(value);
+      setPickupLocationError(null);
+      setFormData((prev) => ({
+        ...prev,
+        pickupLocation: value,
+        pickupLatitude: null,
+        pickupLongitude: null,
+        pickupPlaceId: '',
+        pickupLocationSource: 'manual',
+      }));
+    } else if (name === 'dropoffLocation') {
+      dropoffField.updateAddress(value);
+      setFormData((prev) => ({ ...prev, dropoffLocation: value }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+
     if (errors[name as keyof BookingFormData]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
   };
 
-  const handleBookingTypeChange = (type: BookingType) => {
-    setFormData((prev) => ({ ...prev, bookingType: type }));
+  useEffect(() => {
+    if (isSuccess && confirmationRef.current) {
+      setTimeout(() => {
+        confirmationRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
+  }, [isSuccess]);
+
+  const handleClickAnotherBooking = () => {
+    setIsSuccess(false);
+    onReset?.();
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setPickupLocationError('Location is not supported on this device/browser.');
+      return;
+    }
+
+    setIsLocatingPickup(true);
+    setPickupLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        const fallbackLabel = `Current Location (${latitude}, ${longitude})`;
+
+        pickupField.setResolvedLocation(fallbackLabel, {
+          latitude,
+          longitude,
+          source: 'current-location',
+        });
+
+        setFormData((prev) => ({
+          ...prev,
+          pickupLocation: fallbackLabel,
+          pickupLatitude: latitude,
+          pickupLongitude: longitude,
+          pickupPlaceId: '',
+          pickupLocationSource: 'current-location',
+        }));
+
+        setErrors((prev) => ({ ...prev, pickupLocation: undefined }));
+        setIsLocatingPickup(false);
+      },
+      (error) => {
+        const errorMessage =
+          error.code === error.PERMISSION_DENIED
+            ? 'Location permission was denied. Please enter pickup manually.'
+            : 'Unable to get your current location right now. Please enter pickup manually.';
+
+        pickupField.markCurrentLocationRequested();
+        setPickupLocationError(errorMessage);
+        setIsLocatingPickup(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -88,7 +189,7 @@ export function BookingForm({ defaultBookingType = 'PERSONAL', onSuccess }: Book
     }
 
     try {
-      const response = await fetch('/api/bookings', {
+      const response = await fetch('/api/bookings/public', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -100,15 +201,18 @@ export function BookingForm({ defaultBookingType = 'PERSONAL', onSuccess }: Book
       const data = await response.json();
 
       if (!response.ok) {
-        setErrors({ pickupDateTime: data.error || 'Failed to create booking' });
+        setErrors({ pickupDateTime: data.error || 'Something went wrong. Please try again.' });
         setIsSubmitting(false);
         return;
       }
 
       setIsSuccess(true);
-      onSuccess?.(result.data);
-      setFormData({
-        bookingType: defaultBookingType,
+      onBookingSuccess?.();
+      pickupField.reset();
+      dropoffField.reset();
+      setPickupLocationError(null);
+      setFormData((prev) => ({
+        bookingType: prev.bookingType,
         fullName: '',
         email: '',
         phone: '',
@@ -117,189 +221,234 @@ export function BookingForm({ defaultBookingType = 'PERSONAL', onSuccess }: Book
         pickupDateTime: '',
         carType: 'SEDAN',
         specialInstructions: '',
-      });
+        pickupLatitude: null,
+        pickupLongitude: null,
+        pickupPlaceId: '',
+        pickupLocationSource: 'manual',
+      }));
       setIsSubmitting(false);
     } catch {
-      setErrors({ pickupDateTime: 'Network error. Please try again.' });
+      setErrors({ pickupDateTime: 'Something went wrong. Please try again.' });
       setIsSubmitting(false);
     }
   };
 
-  if (isSuccess) {
-    return (
-      <div className="bg-zinc-50 dark:bg-zinc-900/50 rounded-lg p-8 text-center border border-zinc-200 dark:border-zinc-700">
-        <div className="mx-auto w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mb-4">
-          <svg className="w-8 h-8 text-amber-600 dark:text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h3 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
-          Booking Received!
-        </h3>
-        <p className="text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
-          We have received your booking request. Our team will contact you shortly to confirm your reservation.
-        </p>
-        <button
-          onClick={() => setIsSuccess(false)}
-          className="text-amber-600 dark:text-amber-500 hover:text-amber-700 dark:hover:text-amber-400 hover:underline font-medium"
-        >
-          Make another booking
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="md:col-span-2">
-          <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
-            Book Your Ride
-          </h2>
-          <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Fill in the details below for a quick and easy booking experience.
+    <form
+      onSubmit={handleSubmit}
+      className={cn('space-y-8', isSuccess && 'flex min-h-[520px] items-center py-6 sm:min-h-[560px] sm:py-10')}
+    >
+      {isSuccess ? (
+        <div
+          ref={confirmationRef}
+          className="mx-auto flex w-full max-w-2xl flex-col items-center rounded-2xl border border-amber-200 bg-amber-50/80 px-6 py-10 text-center shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20 sm:px-10 sm:py-12"
+        >
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
+            <svg className="h-8 w-8 text-amber-600 dark:text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 className="mb-3 text-2xl font-bold text-zinc-900 dark:text-zinc-100 sm:text-3xl">
+            Booking Received!
+          </h3>
+          <p className="max-w-xl text-base leading-relaxed text-zinc-600 dark:text-zinc-400 sm:text-lg">
+            We have received your booking request. Our team will contact you shortly to confirm your reservation.
           </p>
-        </div>
-
-        <div className="md:col-span-2">
-          <div className="flex gap-4 mb-4">
-            <button
-              type="button"
-              className={`flex-1 px-6 py-3 rounded-lg font-medium transition-colors border ${
-                formData.bookingType === 'PERSONAL'
-                  ? 'bg-amber-500 border-amber-500 text-zinc-900'
-                  : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 hover:border-amber-500'
-              }`}
-              onClick={() => handleBookingTypeChange('PERSONAL')}
-            >
-              Personal Booking
-            </button>
-            <button
-              type="button"
-              className={`flex-1 px-6 py-3 rounded-lg font-medium transition-colors border ${
-                formData.bookingType === 'BUSINESS'
-                  ? 'bg-amber-500 border-amber-500 text-zinc-900'
-                  : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 hover:border-amber-500'
-              }`}
-              onClick={() => handleBookingTypeChange('BUSINESS')}
-            >
-              Business Booking
-            </button>
+          <div className="mt-8 flex justify-center">
+            <Button type="button" onClick={handleClickAnotherBooking} size="lg" className="w-full sm:w-auto sm:min-w-[220px]">
+              Make Another Booking
+            </Button>
           </div>
         </div>
+      ) : (
+        <div className="grid gap-5 sm:gap-6 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+              Book Your Ride
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              Fill in the details below for a quick and easy booking experience.
+            </p>
+          </div>
 
-        <div className="md:col-span-2">
-          <Input
-            label="Full Name"
-            name="fullName"
-            value={formData.fullName}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="Rajesh Kumar"
-            error={errors.fullName}
-            fullWidth
-          />
+          <div className="md:col-span-2">
+            <Input
+              label="Full Name"
+              name="fullName"
+              value={formData.fullName}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="Rajesh Kumar"
+              error={errors.fullName}
+              fullWidth
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <Input
+              label="Email Address"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="rajesh@example.com"
+              error={errors.email}
+              fullWidth
+            />
+          </div>
+
+          <div>
+            <Input
+              label="Mobile Number"
+              name="phone"
+              type="tel"
+              value={formData.phone}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="+91 98765 43210"
+              error={errors.phone}
+            />
+          </div>
+
+          <div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="pickupDateTime" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Pickup Date & Time
+              </label>
+              <input
+                ref={pickupDateTimeInputRef}
+                id="pickupDateTime"
+                name="pickupDateTime"
+                type="datetime-local"
+                value={formData.pickupDateTime}
+                onChange={(e) => {
+                  handleInputChange(e);
+
+                  if (e.target.value) {
+                    setTimeout(() => {
+                      pickupDateTimeInputRef.current?.blur();
+                    }, 0);
+                  }
+                }}
+                min={new Date().toISOString().split('T')[0] + 'T00:00'}
+                aria-invalid={!!errors.pickupDateTime}
+                aria-describedby="pickupDateTime-help"
+                className={cn(
+                  'w-full min-w-0 rounded-lg border px-3 py-2.5 text-base transition-colors',
+                  'bg-white dark:bg-zinc-800',
+                  'border-zinc-300 dark:border-zinc-700',
+                  'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                  'dark:text-white',
+                  errors.pickupDateTime && 'border-red-500 focus:ring-red-500'
+                )}
+              />
+              <div id="pickupDateTime-help" className="min-h-[24px]">
+                {errors.pickupDateTime ? (
+                  <span className="text-sm text-red-600 dark:text-red-400">{errors.pickupDateTime}</span>
+                ) : formData.pickupDateTime ? (
+                  <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Selected: {formatPickupDateTime(formData.pickupDateTime)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <Input
+              label="Pickup Location"
+              name="pickupLocation"
+              value={pickupField.address}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="Flat 302, Green Park Apartments, Sector 62, Noida"
+              error={errors.pickupLocation}
+              fullWidth
+            />
+            <div className="mt-2 flex flex-col gap-3 text-xs text-zinc-500 dark:text-zinc-400 sm:flex-row sm:items-start sm:justify-between">
+              <span className="min-w-0 leading-relaxed">{getLocationUpgradeHint('pickup')}</span>
+              <button
+                type="button"
+                onClick={handleUseCurrentLocation}
+                disabled={isLocatingPickup}
+                className="self-start whitespace-nowrap text-left font-medium text-amber-600 transition-colors hover:text-amber-500 disabled:opacity-60 dark:text-amber-400 sm:self-auto sm:text-right"
+              >
+                {isLocatingPickup ? 'Getting Current Location...' : 'Use Current Location'}
+              </button>
+            </div>
+            {pickupLocationError && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">{pickupLocationError}</p>
+            )}
+          </div>
+
+          <div className="md:col-span-2">
+            <Input
+              label="Drop Location"
+              name="dropoffLocation"
+              value={dropoffField.address}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="Terminal 3, IGI Airport, New Delhi"
+              error={errors.dropoffLocation}
+              fullWidth
+            />
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              {getLocationUpgradeHint('dropoff')}
+            </p>
+          </div>
+
+          <div className="md:col-span-2">
+            <Select
+              label="Vehicle Type"
+              id="carType"
+              options={carTypeOptions}
+              value={formData.carType}
+              onChange={(value: string) => {
+                setFormData((prev) => ({ ...prev, carType: value as typeof formData.carType }));
+                if (errors.carType) {
+                  setErrors((prev) => ({ ...prev, carType: undefined }));
+                }
+              }}
+              error={errors.carType}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <Textarea
+              label="Special Instructions"
+              name="specialInstructions"
+              value={formData.specialInstructions}
+              onChange={handleInputChange}
+              placeholder={undefined}
+              data-placeholder="2 luggage bags, airport pickup, prefer female driver"
+              rows={3}
+            />
+          </div>
         </div>
+      )}
 
-        <div className="md:col-span-2">
-          <Input
-            label="Email Address"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="rajesh@example.com"
-            error={errors.email}
-            fullWidth
-          />
+      {!isSuccess && (
+        <div className="flex justify-center border-t border-zinc-200 pt-2 dark:border-zinc-700">
+          <Button type="submit" isLoading={isSubmitting} size="lg" className="w-full sm:w-auto sm:min-w-[220px]">
+            Book Now
+          </Button>
         </div>
-
-        <div>
-          <Input
-            label="Mobile Number"
-            name="phone"
-            type="tel"
-            value={formData.phone}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="+91 98765 43210"
-            error={errors.phone}
-          />
-        </div>
-
-        <div>
-          <Input
-            label="Pickup Date & Time"
-            name="pickupDateTime"
-            type="datetime-local"
-            value={formData.pickupDateTime}
-            onChange={handleInputChange}
-            min={new Date().toISOString().split('T')[0] + 'T00:00'}
-            error={errors.pickupDateTime}
-          />
-        </div>
-
-        <div className="md:col-span-2">
-          <Input
-            label="Pickup Location"
-            name="pickupLocation"
-            value={formData.pickupLocation}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="Flat 302, Green Park Apartments, Sector 62, Noida"
-            error={errors.pickupLocation}
-            fullWidth
-          />
-        </div>
-
-        <div className="md:col-span-2">
-          <Input
-            label="Drop Location"
-            name="dropoffLocation"
-            value={formData.dropoffLocation}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="Terminal 3, IGI Airport, New Delhi"
-            error={errors.dropoffLocation}
-            fullWidth
-          />
-        </div>
-
-        <div className="md:col-span-2">
-          <Select
-            label="Vehicle Type"
-            id="carType"
-            options={carTypeOptions}
-            value={formData.carType}
-            onChange={(value: string) => {
-              setFormData((prev) => ({ ...prev, carType: value as typeof formData.carType }));
-              if (errors.carType) {
-                setErrors((prev) => ({ ...prev, carType: undefined }));
-              }
-            }}
-            error={errors.carType}
-          />
-        </div>
-
-        <div className="md:col-span-2">
-          <Textarea
-            label="Special Instructions"
-            name="specialInstructions"
-            value={formData.specialInstructions}
-            onChange={handleInputChange}
-            placeholder={undefined}
-            data-placeholder="2 luggage bags, airport pickup, prefer female driver"
-            rows={3}
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end pt-4 border-t border-zinc-200 dark:border-zinc-700">
-        <Button type="submit" isLoading={isSubmitting} size="lg" fullWidth className="md:flex md:w-auto">
-          Book Now
-        </Button>
-      </div>
+      )}
     </form>
   );
+}
+
+function formatPickupDateTime(value: string) {
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsedDate);
 }

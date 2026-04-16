@@ -2,58 +2,74 @@
 
 import { Navbar } from '@/components/layout/Navbar';
 import { BookingForm } from '@/components/form/BookingForm';
-import { useState, useEffect } from 'react';
-import type { BookingType } from '@/types';
+import { Suspense, useState } from 'react';
+import { CONTACT_PHONE_HREF, WHATSAPP_HREF } from '@/lib/contact';
 
 export default function Home() {
-  const [bookingType, setBookingType] = useState<BookingType>('PERSONAL');
+  const [isBookingSuccess, setIsBookingSuccess] = useState(false);
 
-  useEffect(() => {
-    const storedType = sessionStorage.getItem('preferredBookingType') as BookingType | null;
-    if (storedType === 'BUSINESS' || storedType === 'PERSONAL') {
-      setBookingType(storedType);
-      sessionStorage.removeItem('preferredBookingType');
-    }
-  }, []);
+  const handleHeroBookNowClick = () => {
+    document.getElementById('ride')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
-    <div className="min-h-full bg-zinc-50 dark:bg-zinc-900">
-      {/* Navbar */}
+    <div className="min-h-full overflow-x-hidden bg-zinc-50 dark:bg-zinc-900">
       <Navbar />
 
-      {/* Hero Section */}
-      <section className="bg-zinc-900 pt-20 sm:pt-28">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-800 rounded-full text-zinc-300 text-sm font-medium mb-6">
-            <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
-            Available 24/7 Across India
+      {!isBookingSuccess && (
+        <section className="bg-zinc-900 pt-8 sm:pt-10 lg:pt-12">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14 sm:pb-16 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 mb-4 sm:mb-5">
+              <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+              Available 24/7 Across India
+            </div>
+            <h1 className="mx-auto mb-4 max-w-[12ch] break-words text-[2.15rem] font-bold tracking-tight text-white sm:max-w-none sm:text-5xl md:text-6xl">
+              UrbanMile - Your Reliable Ride
+            </h1>
+            <p className="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+              Professional, reliable, and comfortable rides across India. 
+              Book your journey with confidence.
+            </p>
+            <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+              <button
+                type="button"
+                onClick={handleHeroBookNowClick}
+                className="inline-flex items-center justify-center px-8 py-4 bg-amber-500 hover:bg-amber-600 text-zinc-900 font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-amber-500/25"
+              >
+                Book Your Ride Now
+              </button>
+            </div>
           </div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-4 tracking-tight">
-            UrbanMile - Your Reliable Ride
-          </h1>
-          <p className="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-            Professional, reliable, and comfortable rides across India. 
-            Book your journey with confidence.
-          </p>
-          <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+        </section>
+      )}
+
+      <section id="ride" className="scroll-mt-24 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 -mt-6 sm:-mt-8 mb-12">
+        <div className="bg-white dark:bg-zinc-800 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-700 p-5 sm:p-8 md:p-14">
+          <div className="mb-5 flex flex-col items-stretch justify-center gap-3 sm:mb-6 sm:flex-row">
             <a
-              href="#book-ride"
-              className="inline-flex items-center justify-center px-8 py-4 bg-amber-500 hover:bg-amber-600 text-zinc-900 font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-amber-500/25"
+              href={WHATSAPP_HREF}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-500 hover:text-white dark:text-emerald-400"
             >
-              Book Your Ride Now
+              Chat on WhatsApp
+            </a>
+            <a
+              href={CONTACT_PHONE_HREF}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-amber-500 px-4 py-3 text-sm font-semibold text-amber-600 transition-colors hover:bg-amber-500 hover:text-zinc-900 dark:text-amber-400"
+            >
+              Call Now
             </a>
           </div>
+          <Suspense fallback={<div className="min-h-[320px] animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-700" />}>
+            <BookingForm 
+              onBookingSuccess={() => setIsBookingSuccess(true)}
+              onReset={() => setIsBookingSuccess(false)}
+            />
+          </Suspense>
         </div>
       </section>
 
-      {/* Booking Form Section */}
-      <section id="book-ride" className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 mb-20">
-        <div className="bg-white dark:bg-zinc-800 rounded-lg shadow-2xl p-6 sm:p-8 md:p-10 border border-zinc-200 dark:border-zinc-700">
-          <BookingForm defaultBookingType={bookingType} />
-        </div>
-      </section>
-
-      {/* Features Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
         <div className="grid md:grid-cols-3 gap-6">
           {[
@@ -103,8 +119,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* About Section */}
-      <section id="about" className="bg-zinc-100 dark:bg-zinc-800 py-20">
+      <section id="business" className="bg-zinc-100 dark:bg-zinc-800 py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-center text-zinc-900 dark:text-zinc-100 mb-8">
             About UrbanMile
@@ -124,8 +139,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* How It Works */}
-      <section className="bg-zinc-50 dark:bg-zinc-900 py-20">
+      <section id="about" className="bg-zinc-50 dark:bg-zinc-900 py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-center text-zinc-900 dark:text-zinc-100 mb-4">
             Simple Journey in Three Steps
@@ -155,18 +169,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="bg-zinc-900 text-zinc-400 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="border-t border-zinc-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="border-t border-zinc-800 pt-8 flex items-center justify-center">
             <p className="text-sm">
               &copy; 2026 UrbanMile. All rights reserved.
             </p>
-            <div className="flex items-center gap-4">
-              <a href="/admin" className="text-sm text-amber-500 hover:text-amber-400 transition-colors">
-                Admin Dashboard
-              </a>
-            </div>
           </div>
         </div>
       </footer>

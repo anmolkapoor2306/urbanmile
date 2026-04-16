@@ -2,6 +2,13 @@
 
 export type BookingType = 'PERSONAL' | 'BUSINESS';
 
+export interface BookingLocationMetadata {
+  latitude?: number | null;
+  longitude?: number | null;
+  placeId?: string;
+  source?: 'manual' | 'autocomplete' | 'current-location';
+}
+
 export interface BookingFormData {
   bookingType: BookingType;
   fullName: string;
@@ -12,6 +19,14 @@ export interface BookingFormData {
   pickupDateTime: string;
   carType: 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
   specialInstructions?: string;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  pickupPlaceId?: string;
+  pickupLocationSource?: BookingLocationMetadata['source'];
+  dropoffLatitude?: number | null;
+  dropoffLongitude?: number | null;
+  dropoffPlaceId?: string;
+  dropoffLocationSource?: BookingLocationMetadata['source'];
 }
 
 export type BookingStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
