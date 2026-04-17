@@ -1,4 +1,4 @@
-const DEFAULT_CONTACT_NUMBER = '919876543210';
+const DEFAULT_CONTACT_NUMBER = '918146606635';
 const DEFAULT_WHATSAPP_MESSAGE = 'Hello I want to book a ride';
 
 function normalizeIndianPhoneNumber(value: string | undefined): string {

@@ -13,7 +13,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-full overflow-x-hidden bg-zinc-50 dark:bg-zinc-900">
+    <div className="min-h-full overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
       <Navbar />
 
       {!isBookingSuccess && (
@@ -44,7 +44,7 @@ export default function Home() {
       )}
 
       <section id="ride" className="scroll-mt-24 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 -mt-6 sm:-mt-8 mb-12">
-        <div className="bg-white dark:bg-zinc-800 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-700 p-5 sm:p-8 md:p-14">
+        <div className="bg-white dark:bg-zinc-800 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-700 p-5 sm:p-8 md:p-14 pb-6">
           <div className="mb-5 flex flex-col items-stretch justify-center gap-3 sm:mb-6 sm:flex-row">
             <a
               href={WHATSAPP_HREF}
@@ -169,7 +169,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="bg-zinc-900 text-zinc-400 py-8">
+      <footer className="bg-zinc-900 dark:bg-zinc-950 text-zinc-400 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="border-t border-zinc-800 pt-8 flex items-center justify-center">
             <p className="text-sm">

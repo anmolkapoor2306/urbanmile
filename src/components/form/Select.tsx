@@ -31,6 +31,7 @@ export function Select({ label, options, value, onChange, error, fullWidth = fal
         disabled={disabled}
         className={cn(
           'w-full min-w-0 rounded-lg border px-3 py-2.5 text-base transition-colors',
+          'text-zinc-900',
           'bg-white dark:bg-zinc-800',
           'border-zinc-300 dark:border-zinc-700',
           'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent',

@@ -367,19 +367,20 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
               error={errors.pickupLocation}
               fullWidth
             />
-            <div className="mt-2 flex flex-col gap-3 text-xs text-zinc-500 dark:text-zinc-400 sm:flex-row sm:items-start sm:justify-between">
-              <span className="min-w-0 leading-relaxed">{getLocationUpgradeHint('pickup')}</span>
-              <button
-                type="button"
-                onClick={handleUseCurrentLocation}
-                disabled={isLocatingPickup}
-                className="self-start whitespace-nowrap text-left font-medium text-amber-600 transition-colors hover:text-amber-500 disabled:opacity-60 dark:text-amber-400 sm:self-auto sm:text-right"
-              >
-                {isLocatingPickup ? 'Getting Current Location...' : 'Use Current Location'}
-              </button>
-            </div>
+            <Button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              isLoading={isLocatingPickup}
+              fullWidth
+              className="mt-2"
+            >
+              📍 {isLocatingPickup ? 'Getting location...' : 'Use Current Location'}
+            </Button>
+            <p className="mt-1.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Uses your device location when permission is granted.
+            </p>
             {pickupLocationError && (
-              <p className="mt-2 text-xs text-red-600 dark:text-red-400">{pickupLocationError}</p>
+              <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{pickupLocationError}</p>
             )}
           </div>
 
@@ -430,7 +431,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       )}
 
       {!isSuccess && (
-        <div className="flex justify-center border-t border-zinc-200 pt-2 dark:border-zinc-700">
+        <div className="flex justify-center border-t border-zinc-200 pt-6 dark:border-zinc-700">
           <Button type="submit" isLoading={isSubmitting} size="lg" className="w-full sm:w-auto sm:min-w-[220px]">
             Book Now
           </Button>

@@ -33,7 +33,7 @@ export function AdminLogin() {
   };
 
   return (
-    <div className="min-h-full bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center px-4 sm:px-6 lg:px-8">
+    <div className="min-h-[100dvh] bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center px-4 py-8 sm:px-6 lg:px-8 text-zinc-900 dark:text-zinc-100">
       <div className="max-w-md w-full space-y-8">
         <div className="bg-white dark:bg-zinc-800 rounded-lg shadow-lg p-8 border border-zinc-200 dark:border-zinc-700">
           <div className="text-center">

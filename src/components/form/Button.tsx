@@ -23,7 +23,7 @@ export function Button({
   
   const variants = {
     primary: 'bg-amber-500 hover:bg-amber-600 text-zinc-900 focus:ring-amber-500 shadow-lg hover:shadow-amber-500/25',
-    secondary: 'bg-zinc-100 hover:bg-zinc-200 text-zinc-900 focus:ring-zinc-500 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-100',
+    secondary: 'bg-zinc-100 hover:bg-zinc-200 text-zinc-900 focus:ring-zinc-500 dark:bg-zinc-700 dark:hover:bg-zinc-600 dark:text-zinc-100',
     danger: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600',
   };
 
