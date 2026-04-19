@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { bookingRecordSelect, createBookingReference, serializeBooking } from '@/lib/bookingRecord';
 import { z } from 'zod';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 
@@ -47,43 +48,49 @@ export async function POST(request: NextRequest) {
       pickupDateTime,
       carType,
       specialInstructions,
+      pickupLatitude,
+      pickupLongitude,
+      pickupPlaceId,
+      pickupLocationSource,
+      dropoffLatitude,
+      dropoffLongitude,
+      dropoffPlaceId,
+      dropoffLocationSource,
     } = result.data;
+    const id = crypto.randomUUID();
+    const pickupAt = new Date(pickupDateTime);
 
-    // Accept future Google Maps metadata now so the request contract can stay stable.
     const booking = await prisma.booking.create({
       data: {
+        id,
+        bookingReference: createBookingReference(id, pickupAt),
         bookingType,
         fullName,
         email,
         phone,
         pickupLocation,
+        pickupLatitude: pickupLatitude ?? null,
+        pickupLongitude: pickupLongitude ?? null,
+        pickupPlaceId: pickupPlaceId || null,
+        pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
         dropoffLocation,
-        pickupDateTime: new Date(pickupDateTime),
+        dropoffLatitude: dropoffLatitude ?? null,
+        dropoffLongitude: dropoffLongitude ?? null,
+        dropoffPlaceId: dropoffPlaceId || null,
+        dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+        pickupDateTime: pickupAt,
         carType,
         specialInstructions: specialInstructions || null,
-        status: 'PENDING',
+        status: 'NEW',
       },
+      select: bookingRecordSelect,
     });
 
     return NextResponse.json(
       {
         success: true,
         message: 'Booking created successfully',
-        data: {
-          id: booking.id,
-          bookingType: booking.bookingType,
-          fullName: booking.fullName,
-          email: booking.email,
-          phone: booking.phone,
-          pickupLocation: booking.pickupLocation,
-          dropoffLocation: booking.dropoffLocation,
-          pickupDateTime: booking.pickupDateTime.toISOString(),
-          carType: booking.carType,
-          specialInstructions: booking.specialInstructions,
-          status: booking.status,
-          createdAt: booking.createdAt.toISOString(),
-          bookingReference: `UM-${booking.createdAt.toISOString().slice(0, 10).replace(/-/g, '')}-${booking.id.slice(0, 8)}`,
-        },
+        data: serializeBooking(booking),
       },
       { status: 201 }
     );

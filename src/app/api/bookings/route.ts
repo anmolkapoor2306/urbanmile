@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { BOOKING_STATUSES } from '@/lib/dispatch';
+import { bookingRecordSelect, createBookingReference, serializeBooking } from '@/lib/bookingRecord';
 import { z } from 'zod';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 
@@ -35,13 +37,13 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const limit = parseInt(searchParams.get('limit') || '100');
 
-    const where: { status?: string } = {};
-    if (status && ['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED'].includes(status)) {
-      where.status = status;
-    }
+    const where = status && BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])
+      ? { status: status as (typeof BOOKING_STATUSES)[number] }
+      : {};
 
     const bookings = await prisma.booking.findMany({
-      where: status ? { status: status as 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' } : {},
+      where,
+      select: bookingRecordSelect,
       take: limit,
       orderBy: { pickupDateTime: 'asc' },
     });
@@ -49,35 +51,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        data: bookings.map((bookingRecord: {
-          id: string;
-          fullName: string;
-          email: string;
-          phone: string;
-          pickupLocation: string;
-          dropoffLocation: string;
-          pickupDateTime: Date;
-          carType: string;
-          specialInstructions: string | null;
-          status: string;
-          createdAt: Date;
-          updatedAt: Date;
-        }) => ({
-          id: bookingRecord.id,
-          bookingType: 'PERSONAL',
-          fullName: bookingRecord.fullName,
-          email: bookingRecord.email,
-          phone: bookingRecord.phone,
-          pickupLocation: bookingRecord.pickupLocation,
-          dropoffLocation: bookingRecord.dropoffLocation,
-          pickupDateTime: bookingRecord.pickupDateTime.toISOString(),
-          carType: bookingRecord.carType,
-          specialInstructions: bookingRecord.specialInstructions,
-          status: bookingRecord.status,
-          createdAt: bookingRecord.createdAt.toISOString(),
-          updatedAt: bookingRecord.updatedAt.toISOString(),
-          bookingReference: `UM-${bookingRecord.createdAt.toISOString().slice(0, 10).replace(/-/g, '')}-${bookingRecord.id.slice(0, 8)}`,
-        })),
+        data: bookings.map(serializeBooking),
       },
       {
         headers: {
@@ -119,43 +93,49 @@ export async function POST(request: NextRequest) {
       pickupDateTime,
       carType,
       specialInstructions,
+      pickupLatitude,
+      pickupLongitude,
+      pickupPlaceId,
+      pickupLocationSource,
+      dropoffLatitude,
+      dropoffLongitude,
+      dropoffPlaceId,
+      dropoffLocationSource,
     } = result.data;
+    const id = crypto.randomUUID();
+    const pickupAt = new Date(pickupDateTime);
 
-    // Coordinates/place IDs are accepted now for a future DB migration.
     const booking = await prisma.booking.create({
       data: {
+        id,
+        bookingReference: createBookingReference(id, pickupAt),
         bookingType,
         fullName,
         email,
         phone,
         pickupLocation,
+        pickupLatitude: pickupLatitude ?? null,
+        pickupLongitude: pickupLongitude ?? null,
+        pickupPlaceId: pickupPlaceId || null,
+        pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
         dropoffLocation,
-        pickupDateTime: new Date(pickupDateTime),
+        dropoffLatitude: dropoffLatitude ?? null,
+        dropoffLongitude: dropoffLongitude ?? null,
+        dropoffPlaceId: dropoffPlaceId || null,
+        dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+        pickupDateTime: pickupAt,
         carType,
         specialInstructions: specialInstructions || null,
-        status: 'PENDING',
+        status: 'NEW',
       },
+      select: bookingRecordSelect,
     });
 
     return NextResponse.json(
       {
         success: true,
         message: 'Booking created successfully',
-        data: {
-          id: booking.id,
-          bookingType: booking.bookingType,
-          fullName: booking.fullName,
-          email: booking.email,
-          phone: booking.phone,
-          pickupLocation: booking.pickupLocation,
-          dropoffLocation: booking.dropoffLocation,
-          pickupDateTime: booking.pickupDateTime.toISOString(),
-          carType: booking.carType,
-          specialInstructions: booking.specialInstructions,
-          status: booking.status,
-          createdAt: booking.createdAt.toISOString(),
-          bookingReference: `UM-${booking.createdAt.toISOString().slice(0, 10).replace(/-/g, '')}-${booking.id.slice(0, 8)}`,
-        },
+        data: serializeBooking(booking),
       },
       { status: 201 }
     );

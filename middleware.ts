@@ -11,6 +11,7 @@ export function middleware(request: NextRequest) {
   const isProtectedAdminPage = path === '/admin' || (path.startsWith('/admin/') && !isAdminLoginPage);
   const isProtectedBookingsApi = path === '/api/bookings' || path.startsWith('/api/bookings/');
   const isPublicBookingsApi = path === '/api/bookings/public' || path.startsWith('/api/bookings/public/');
+  const isProtectedDriversApi = path === '/api/drivers' || path.startsWith('/api/drivers/');
 
   if (isProtectedAdminPage && !isAuthenticated) {
     return NextResponse.redirect(new URL('/admin/login', request.url));
@@ -24,6 +25,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  if (isProtectedDriversApi && !isAuthenticated) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   return NextResponse.next();
 }
 
@@ -33,5 +38,7 @@ export const config = {
     '/admin/:path*',
     '/api/bookings',
     '/api/bookings/:path*',
+    '/api/drivers',
+    '/api/drivers/:path*',
   ],
 };

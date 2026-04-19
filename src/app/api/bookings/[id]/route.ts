@@ -21,6 +21,7 @@ export async function DELETE(
 
     const deletedBooking = await prisma.booking.delete({
       where: { id },
+      select: { id: true },
     });
 
     return NextResponse.json({

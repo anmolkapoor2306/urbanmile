@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { BOOKING_STATUSES } from '@/lib/dispatch';
+import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 
 const statusUpdateSchema = z.object({
-  status: z.enum(['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED']),
+  status: z.enum(BOOKING_STATUSES),
 });
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -25,6 +27,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const existingBooking = await prisma.booking.findUnique({
       where: { id },
+      select: { id: true, status: true },
     });
 
     if (!existingBooking) {
@@ -34,28 +37,37 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       );
     }
 
+    const statusTimestamps: Record<string, Date | null | undefined> = {};
+
+    if (result.data.status === 'CONFIRMED') {
+      statusTimestamps.confirmedAt = new Date();
+    }
+
+    if (result.data.status === 'IN_PROGRESS') {
+      statusTimestamps.startedAt = new Date();
+    }
+
+    if (result.data.status === 'COMPLETED') {
+      statusTimestamps.completedAt = new Date();
+    }
+
+    if (result.data.status === 'CANCELLED') {
+      statusTimestamps.cancelledAt = new Date();
+    }
+
     const booking = await prisma.booking.update({
       where: { id },
-      data: { status: result.data.status },
+      data: {
+        status: result.data.status,
+        ...statusTimestamps,
+      },
+      select: bookingRecordSelect,
     });
 
     return NextResponse.json({
       success: true,
       message: 'Booking status updated successfully',
-        data: {
-          id: booking.id,
-          fullName: booking.fullName,
-          email: booking.email,
-          phone: booking.phone,
-          pickupLocation: booking.pickupLocation,
-          dropoffLocation: booking.dropoffLocation,
-          pickupDateTime: booking.pickupDateTime.toISOString(),
-          carType: booking.carType,
-          specialInstructions: booking.specialInstructions,
-        status: booking.status,
-        createdAt: booking.createdAt.toISOString(),
-        updatedAt: booking.updatedAt.toISOString(),
-      },
+      data: serializeBooking(booking),
     });
   } catch (error) {
     console.error('Error updating booking status:', error);
@@ -65,3 +77,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     );
   }
 }
+
+export const dynamic = 'force-dynamic';

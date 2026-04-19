@@ -29,11 +29,14 @@ export interface BookingFormData {
   dropoffLocationSource?: BookingLocationMetadata['source'];
 }
 
-export type BookingStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
+export type BookingStatus = 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 export type CarType = 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
+export type DriverType = 'OWN' | 'THIRD_PARTY' | 'VENDOR';
+export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 export type Booking = {
   id: string;
+  bookingReference: string;
   fullName: string;
   email: string;
   phone: string;
@@ -43,9 +46,31 @@ export type Booking = {
   carType:CarType;
   specialInstructions: string | null;
   status: BookingStatus;
+  paymentStatus?: PaymentStatus;
+  driverId?: string | null;
+  fareAmount?: number | null;
+  commissionAmount?: number | null;
+  payoutAmount?: number | null;
+  netEarningAmount?: number | null;
+  driverEarning?: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+export interface Driver {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  vehicleType: CarType;
+  vehicleNumber: string;
+  isActive: boolean;
+  driverType: DriverType;
+  availabilityStatus?: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
+  companyName?: string | null;
+  licenseInfo?: string | null;
+  notes?: string | null;
+}
 
 export interface CreateBookingInput extends Omit<BookingFormData, 'pickupDateTime'> {
   pickupDateTime: Date;
