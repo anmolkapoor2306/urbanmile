@@ -2,6 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  AdminPanel,
+  AdminStatCard,
+  AdminStatsGrid,
+  adminInputClassName,
+  adminSecondaryButtonClassName,
+} from '@/components/admin/AdminLayout';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getBookingStatusLabel, getDriverTypeLabel } from '@/lib/dispatch';
@@ -37,8 +44,8 @@ export function DispatchBoard({
   }, [bookings, queueFilter]);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col gap-8">
-      <div className="grid shrink-0 grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+    <div className="flex flex-1 min-h-0 flex-col gap-6 overflow-hidden">
+      <AdminStatsGrid className="md:grid-cols-3 xl:grid-cols-6">
         {[
           ['Total Drivers', metrics.totalDrivers],
           ['Available Drivers', metrics.availableDrivers],
@@ -47,14 +54,11 @@ export function DispatchBoard({
           ['Active Trips', metrics.activeTrips],
           ['Completed Today', metrics.completedToday],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
-            <div className="text-sm text-zinc-500 dark:text-zinc-400">{label}</div>
-            <div className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{value}</div>
-          </div>
+          <AdminStatCard key={label} label={label} value={value} />
         ))}
-      </div>
+      </AdminStatsGrid>
 
-      <div className="flex gap-4 flex-1 min-h-0 flex-col xl:flex-row">
+      <div className="flex flex-1 min-h-0 flex-col gap-6 xl:flex-row">
         <DispatchQueueColumn
           bookings={queueBookings}
           drivers={availableDrivers}
@@ -79,21 +83,21 @@ function DispatchQueueColumn({
   onFilterChange: (filter: QueueFilter) => void;
 }) {
   return (
-    <section className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
+    <AdminPanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
       <div className="shrink-0">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Dispatch Queue</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Confirmed rides on the left, available drivers on the right, with assignment done in one place.</p>
+            <h2 className="text-lg font-semibold text-zinc-100">Dispatch Queue</h2>
+            <p className="text-sm text-zinc-500">Confirmed rides on the left, available drivers on the right, with assignment done in one place.</p>
           </div>
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">{bookings.length}</span>
+          <span className="text-sm text-zinc-500">{bookings.length}</span>
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-2">
           {[
             ['READY', 'Confirmed'],
             ['ASSIGNED', 'Assigned'],
-            ['ACTIVE', 'In Progress'],
+            ['ACTIVE', 'Active'],
             ['ALL', 'All'],
           ].map(([key, label]) => (
             <button
@@ -101,10 +105,10 @@ function DispatchQueueColumn({
               type="button"
               onClick={() => onFilterChange(key as QueueFilter)}
               className={cn(
-                'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                'rounded-xl px-3 py-2 text-sm font-medium transition-colors',
                 filter === key
                   ? 'bg-amber-500 text-white'
-                  : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-700'
+                  : 'bg-zinc-950 text-zinc-300 hover:bg-zinc-900'
               )}
             >
               {label}
@@ -113,47 +117,47 @@ function DispatchQueueColumn({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+      <div className="dashboard-scrollbar flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
         {bookings.length === 0 ? (
           <EmptyState message="No bookings in this queue." />
         ) : (
           bookings.map((booking) => <AssignableBookingCard key={booking.id} booking={booking} drivers={drivers} />)
         )}
       </div>
-    </section>
+    </AdminPanel>
   );
 }
 
 function AvailableDriversColumn({ drivers }: { drivers: SerializedDriver[] }) {
   return (
-    <section id="drivers-section" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800 xl:w-[32%] xl:max-w-md xl:shrink-0">
+    <AdminPanel id="drivers-section" className="flex min-h-0 flex-col overflow-hidden p-5 xl:w-[32%] xl:max-w-md xl:shrink-0">
       <div className="mb-4 flex shrink-0 items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Available Drivers</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Only drivers currently marked available are shown here.</p>
+          <h2 className="text-lg font-semibold text-zinc-100">Available Drivers</h2>
+          <p className="text-sm text-zinc-500">Only drivers currently marked available are shown here.</p>
         </div>
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">{drivers.length}</span>
+        <span className="text-sm text-zinc-500">{drivers.length}</span>
       </div>
 
-      <div className="min-h-0 space-y-3 pr-1">
+      <div className="dashboard-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         {drivers.length === 0 ? (
           <EmptyState message="No available drivers right now." />
         ) : (
           drivers.map((driver) => (
-            <div key={driver.id} className="rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+            <div key={driver.id} className="rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{driver.name}</div>
-                  <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  <div className="truncate text-sm font-semibold text-zinc-100">{driver.name}</div>
+                  <div className="mt-1 text-sm text-zinc-500">
                     {getCarTypeDisplay(driver.vehicleType)} · {driver.vehicleNumber}
                   </div>
-                  <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  <div className="mt-1 text-xs text-zinc-500">
                     {getDriverTypeLabel(driver.driverType as never)}
-                    {driver.companyName ? ` · ${driver.companyName}` : ''}
+
                   </div>
                 </div>
 
-                <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
+                <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
                   {driver.availabilityStatus || 'AVAILABLE'}
                 </span>
               </div>
@@ -161,7 +165,7 @@ function AvailableDriversColumn({ drivers }: { drivers: SerializedDriver[] }) {
           ))
         )}
       </div>
-    </section>
+    </AdminPanel>
   );
 }
 
@@ -209,16 +213,16 @@ function AssignableBookingCard({
   const parsedFare = confirmedFare.trim() === '' ? null : Number(confirmedFare);
 
   return (
-    <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-2">
-          <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{booking.bookingReference}</div>
-          <div className="truncate text-sm text-zinc-900 dark:text-zinc-100">{booking.pickupLocation} → {booking.dropoffLocation}</div>
-          <div className="text-sm text-zinc-600 dark:text-zinc-300">{booking.fullName} · {booking.phone}</div>
-          <div className="text-sm text-zinc-500 dark:text-zinc-400">
+          <div className="truncate text-sm font-semibold text-zinc-100">{booking.bookingReference}</div>
+          <div className="truncate text-sm text-zinc-100">{booking.pickupLocation} → {booking.dropoffLocation}</div>
+          <div className="text-sm text-zinc-300">{booking.fullName} · {booking.phone}</div>
+          <div className="text-sm text-zinc-500">
             {formatDate(booking.pickupDateTime)} · {formatTime(booking.pickupDateTime)} · {getCarTypeDisplay(booking.carType)}
           </div>
-          <div className="text-sm text-zinc-500 dark:text-zinc-400">
+          <div className="text-sm text-zinc-500">
             Fare {booking.fareAmount ? formatMoney(booking.fareAmount) : 'Pending'} · {getBookingDisplayAssignee(booking)}
           </div>
         </div>
@@ -262,10 +266,10 @@ function AssignableBookingCard({
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => void updateDispatch({ status: 'IN_PROGRESS' })}
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            >
-              Start Trip
+            onClick={() => void updateDispatch({ status: 'IN_PROGRESS' })}
+            className={adminSecondaryButtonClassName}
+          >
+            Start Trip
             </button>
           ) : null}
 
@@ -273,10 +277,10 @@ function AssignableBookingCard({
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => void updateDispatch({ status: 'COMPLETED' })}
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            >
-              Complete Trip
+            onClick={() => void updateDispatch({ status: 'COMPLETED' })}
+            className={adminSecondaryButtonClassName}
+          >
+            Complete Trip
             </button>
           ) : null}
         </div>
@@ -287,7 +291,7 @@ function AssignableBookingCard({
           value={selectedDriverId}
           onChange={(e) => setSelectedDriverId(e.target.value)}
           disabled={isSaving || drivers.length === 0}
-          className={inputClassName}
+          className={adminInputClassName}
         >
           <option value="">Choose available driver</option>
           {drivers.map((driver) => (
@@ -308,17 +312,17 @@ function AssignableBookingCard({
             });
           }}
           disabled={isSaving || !selectedDriverId}
-          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
         >
           {isSaving ? 'Assigning...' : 'Assign Driver'}
         </button>
       </div>
 
-      <div className="mt-4 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-900/70">
+      <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Outsourced Driver</div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">Use this only when the ride is given to an external driver or company.</div>
+            <div className="text-sm font-medium text-zinc-100">Outsourced Driver</div>
+            <div className="text-xs text-zinc-500">Use this only when the ride is given to an external driver or company.</div>
           </div>
           <button
             type="button"
@@ -331,11 +335,11 @@ function AssignableBookingCard({
 
         {outsourcedOpen ? (
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <input value={outsourceVendor} onChange={(e) => setOutsourceVendor(e.target.value)} placeholder="Vendor / company name" className={inputClassName} />
-            <input value={outsourceDriverName} onChange={(e) => setOutsourceDriverName(e.target.value)} placeholder="Driver name" className={inputClassName} />
-            <input value={outsourcePhone} onChange={(e) => setOutsourcePhone(e.target.value)} placeholder="Phone" className={inputClassName} />
-            <input value={outsourceVehicle} onChange={(e) => setOutsourceVehicle(e.target.value)} placeholder="Vehicle details" className={inputClassName} />
-            <input value={outsourceCommission} onChange={(e) => setOutsourceCommission(e.target.value)} placeholder="Commission" type="number" min="0" step="0.01" className={inputClassName} />
+            <input value={outsourceVendor} onChange={(e) => setOutsourceVendor(e.target.value)} placeholder="Vendor / company name" className={adminInputClassName} />
+            <input value={outsourceDriverName} onChange={(e) => setOutsourceDriverName(e.target.value)} placeholder="Driver name" className={adminInputClassName} />
+            <input value={outsourcePhone} onChange={(e) => setOutsourcePhone(e.target.value)} placeholder="Phone" className={adminInputClassName} />
+            <input value={outsourceVehicle} onChange={(e) => setOutsourceVehicle(e.target.value)} placeholder="Vehicle details" className={adminInputClassName} />
+            <input value={outsourceCommission} onChange={(e) => setOutsourceCommission(e.target.value)} placeholder="Commission" type="number" min="0" step="0.01" className={adminInputClassName} />
 
             <div className="md:col-span-2 flex justify-end">
               <button
@@ -371,7 +375,7 @@ function AssignableBookingCard({
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+    <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-4 py-6 text-sm text-zinc-500">
       {message}
     </div>
   );
@@ -388,6 +392,3 @@ function formatDate(value: string) {
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
-
-const inputClassName =
-  'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100';

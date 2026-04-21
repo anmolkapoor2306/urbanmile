@@ -1,23 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
-import { getCarTypeDisplay } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 type DriverFormState = {
   id?: string;
   name: string;
   phone: string;
   email: string;
-  driverType: 'OWN' | 'THIRD_PARTY' | 'VENDOR';
-  companyName: string;
-  vehicleNumber: string;
-  vehicleType: 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
   licenseInfo: string;
-  availabilityStatus: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
-  isActive: boolean;
+  availabilityStatus?: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
   notes: string;
 };
 
@@ -25,13 +20,7 @@ const emptyForm: DriverFormState = {
   name: '',
   phone: '',
   email: '',
-  driverType: 'OWN',
-  companyName: '',
-  vehicleNumber: '',
-  vehicleType: 'SEDAN',
   licenseInfo: '',
-  availabilityStatus: 'AVAILABLE',
-  isActive: true,
   notes: '',
 };
 
@@ -39,8 +28,9 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR'>('ALL');
-  const [selectedDriver, setSelectedDriver] = useState<SerializedDriver | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [editingDriver, setEditingDriver] = useState<DriverFormState | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredDrivers = useMemo(() => {
@@ -49,28 +39,60 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
       const matchesType = typeFilter === 'ALL' || driver.driverType === typeFilter;
       const matchesSearch =
         driver.name.toLowerCase().includes(query) ||
-        driver.phone.includes(search) ||
-        driver.vehicleNumber.toLowerCase().includes(query) ||
-        (driver.companyName || '').toLowerCase().includes(query);
+        driver.phone.includes(search);
 
       return matchesType && matchesSearch;
     });
   }, [drivers, search, typeFilter]);
 
+  const selectedDriver = useMemo(
+    () => (selectedDriverId ? drivers.find((driver) => driver.id === selectedDriverId) ?? null : null),
+    [drivers, selectedDriverId]
+  );
+
+  useEffect(() => {
+    if (!openMenuId) return;
+
+    function handleWindowClick() {
+      setOpenMenuId(null);
+    }
+
+    window.addEventListener('click', handleWindowClick);
+    return () => window.removeEventListener('click', handleWindowClick);
+  }, [openMenuId]);
+
   async function saveDriver() {
     if (!editingDriver) return;
     setIsSubmitting(true);
+
+    const payload = editingDriver.id
+      ? {
+          id: editingDriver.id,
+          name: editingDriver.name,
+          phone: editingDriver.phone,
+          email: editingDriver.email,
+          availabilityStatus: editingDriver.availabilityStatus,
+          licenseInfo: editingDriver.licenseInfo,
+          notes: editingDriver.notes,
+        }
+      : {
+          name: editingDriver.name,
+          phone: editingDriver.phone,
+          email: editingDriver.email,
+          licenseInfo: editingDriver.licenseInfo,
+          notes: editingDriver.notes,
+        };
 
     try {
       const response = await fetch('/api/drivers', {
         method: editingDriver.id ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingDriver),
+        body: JSON.stringify(payload),
       });
 
-      const payload = await response.json();
+      const responsePayload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error || 'Failed to save driver');
+        throw new Error(responsePayload.error || 'Failed to save driver');
       }
 
       setEditingDriver(null);
@@ -83,18 +105,22 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
   }
 
   async function updateDriver(id: string, patch: Record<string, unknown>) {
-    const response = await fetch('/api/drivers', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...patch }),
-    });
+    try {
+      const response = await fetch('/api/drivers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...patch }),
+      });
 
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || 'Failed to update driver');
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to update driver');
+      }
+
+      router.refresh();
+    } catch (error) {
+      alert((error as Error).message);
     }
-
-    router.refresh();
   }
 
   async function removeDriver(id: string) {
@@ -107,229 +133,310 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
       return;
     }
 
+    if (selectedDriverId === id) {
+      setSelectedDriverId(null);
+    }
+
     router.refresh();
   }
 
+  function startEditingDriver(driver: SerializedDriver) {
+    setEditingDriver({
+      id: driver.id,
+      name: driver.name,
+      phone: driver.phone,
+      email: driver.email || '',
+      licenseInfo: driver.licenseInfo || '',
+      availabilityStatus: (driver.availabilityStatus || 'OFFLINE') as DriverFormState['availabilityStatus'],
+      notes: driver.notes || '',
+    });
+  }
+
+  function viewDriver(driverId: string) {
+    setSelectedDriverId(driverId);
+    setOpenMenuId(null);
+  }
+
+  async function runDriverAction(action: 'edit' | 'remove' | 'toggle-active' | 'toggle-availability' | 'off-duty', driver: SerializedDriver) {
+    setOpenMenuId(null);
+
+    if (action === 'edit') {
+      startEditingDriver(driver);
+      return;
+    }
+
+    if (action === 'remove') {
+      await removeDriver(driver.id);
+      return;
+    }
+
+    if (action === 'toggle-active') {
+      await updateDriver(driver.id, { isActive: !driver.isActive });
+      return;
+    }
+
+    if (action === 'toggle-availability') {
+      await updateDriver(driver.id, {
+        availabilityStatus: getDriverVisualStatus(driver) === 'AVAILABLE' ? 'BUSY' : 'AVAILABLE',
+      });
+      return;
+    }
+
+    await updateDriver(driver.id, { availabilityStatus: 'OFFLINE' });
+  }
+
   return (
-    <div className="flex flex-col gap-6">
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col gap-5 overflow-hidden">
+      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/80 px-5 py-4 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Driver Management</h2>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Manage own drivers, third-party drivers, and vendor/company operators.</p>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by driver, phone, company, or vehicle"
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500 md:min-w-[24rem]"
+            />
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value as 'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR')}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500 md:w-56"
+            >
+              <option value="ALL">All Driver Types</option>
+              <option value="OWN">Own Driver</option>
+              <option value="THIRD_PARTY">Third Party Driver</option>
+              <option value="VENDOR">Vendor / Company</option>
+            </select>
           </div>
+
           <button
             type="button"
             onClick={() => setEditingDriver(emptyForm)}
-            className="inline-flex items-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+            className="inline-flex items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
           >
             Add Driver
           </button>
         </div>
-
-        <div className="mt-4 flex flex-col gap-3 md:flex-row">
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by driver, phone, company, or vehicle"
-            className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-          />
-          <select
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value as 'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR')}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-56"
-          >
-            <option value="ALL">All Driver Types</option>
-            <option value="OWN">Own Driver</option>
-            <option value="THIRD_PARTY">Third Party Driver</option>
-            <option value="VENDOR">Vendor / Company</option>
-          </select>
-        </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
-        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
-          <div className="space-y-3">
-            {filteredDrivers.map((driver) => (
-              <div key={driver.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="space-y-1.5">
-                    <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{driver.name}</div>
-                    <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {driver.phone} · {driver.email || 'No email'} · {getDriverTypeLabel(driver.driverType as never)}
-                    </div>
-                    <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {getCarTypeDisplay(driver.vehicleType)} · {driver.vehicleNumber}
-                      {driver.companyName ? ` · ${driver.companyName}` : ''}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDriver(driver)}
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                    >
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEditingDriver({
-                          id: driver.id,
-                          name: driver.name,
-                          phone: driver.phone,
-                          email: driver.email || '',
-                          driverType: driver.driverType as DriverFormState['driverType'],
-                          companyName: driver.companyName || '',
-                          vehicleNumber: driver.vehicleNumber,
-                          vehicleType: driver.vehicleType as DriverFormState['vehicleType'],
-                          licenseInfo: driver.licenseInfo || '',
-                          availabilityStatus: (driver.availabilityStatus || 'AVAILABLE') as DriverFormState['availabilityStatus'],
-                          isActive: driver.isActive,
-                          notes: driver.notes || '',
-                        })
-                      }
-                      className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateDriver(driver.id, { isActive: !driver.isActive })}
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                    >
-                      {driver.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateDriver(driver.id, {
-                          availabilityStatus: driver.availabilityStatus === 'AVAILABLE' ? 'BUSY' : 'AVAILABLE',
-                        })
-                      }
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                    >
-                      Mark {driver.availabilityStatus === 'AVAILABLE' ? 'Busy' : 'Available'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeDriver(driver.id)}
-                      className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
+      <div className="grid w-full flex-1 min-h-0 min-w-0 grid-cols-1 gap-6 lg:grid-cols-[2fr_1.2fr]">
+        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/80 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+          <div className="flex h-full min-h-0 flex-col p-5">
+            <div className="mb-4 flex shrink-0 items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-zinc-100">Driver List</h3>
+                <p className="mt-1 text-sm text-zinc-500">Compact roster with quick actions and live status indicators.</p>
               </div>
-            ))}
+              <span className="text-sm text-zinc-500">
+                {filteredDrivers.length} driver{filteredDrivers.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            <div className="dashboard-scrollbar flex-1 min-h-0 space-y-3 overflow-y-auto pr-1">
+              {filteredDrivers.length > 0 ? (
+                filteredDrivers.map((driver) => {
+                  const isSelected = selectedDriverId === driver.id;
+                  const visualStatus = getDriverVisualStatus(driver);
+
+                  return (
+                    <div
+                      key={driver.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => viewDriver(driver.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          viewDriver(driver.id);
+                        }
+                      }}
+                      className={cn(
+                        'group rounded-2xl border bg-zinc-950/80 p-4 shadow-[0_12px_35px_rgba(0,0,0,0.22)] transition-all hover:border-amber-400/35 hover:shadow-[0_16px_42px_rgba(245,158,11,0.08)]',
+                        isSelected ? 'border-amber-400/60 ring-1 ring-amber-400/20' : 'border-zinc-800'
+                      )}
+                    >
+                      <div className="flex items-start gap-4">
+                        <DriverAvatar driver={driver} />
+
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="truncate text-sm font-semibold text-zinc-100">{driver.name}</div>
+                          <div className="truncate text-sm text-zinc-400">{driver.phone} • {driver.email || 'No email'}</div>
+                          <div className="truncate text-xs font-medium text-zinc-500">
+                            {getDriverTypeLabel(driver.driverType as never)} • {getDriverCodeValue(driver)}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              viewDriver(driver.id);
+                            }}
+                            className="rounded-xl bg-amber-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+                          >
+                            View
+                          </button>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenMenuId((current) => (current === driver.id ? null : driver.id));
+                              }}
+                              className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-900 hover:text-white"
+                              aria-label={`More actions for ${driver.name}`}
+                            >
+                              ⋮
+                            </button>
+
+                            {openMenuId === driver.id ? (
+                              <div
+                                className="absolute right-0 top-12 z-20 w-48 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.45)]"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <ActionMenuItem label="Edit" onClick={() => void runDriverAction('edit', driver)} />
+                                <ActionMenuItem
+                                  label={driver.isActive ? 'Deactivate' : 'Activate'}
+                                  onClick={() => void runDriverAction('toggle-active', driver)}
+                                />
+                                <ActionMenuItem
+                                  label={visualStatus === 'AVAILABLE' ? 'Mark Busy' : 'Mark Available'}
+                                  onClick={() => void runDriverAction('toggle-availability', driver)}
+                                />
+                                <ActionMenuItem label="Remove" tone="danger" onClick={() => void runDriverAction('remove', driver)} />
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-4 py-6 text-sm text-zinc-500">
+                  No drivers match the current search and filter.
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
-        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Driver Detail</h3>
-          {selectedDriver ? (
-            <div className="mt-4 space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
-              <DetailRow label="Driver Code" value={selectedDriver.driverCode || 'Pending'} />
-              <DetailRow label="Phone" value={selectedDriver.phone} />
-              <DetailRow label="Email" value={selectedDriver.email || 'Not provided'} />
-              <DetailRow label="Type" value={getDriverTypeLabel(selectedDriver.driverType as never)} />
-              <DetailRow label="Availability" value={selectedDriver.availabilityStatus || 'AVAILABLE'} />
-              <DetailRow label="Vehicle" value={`${getCarTypeDisplay(selectedDriver.vehicleType)} · ${selectedDriver.vehicleNumber}`} />
-              <DetailRow label="Company" value={selectedDriver.companyName || 'N/A'} />
-              <DetailRow label="License" value={selectedDriver.licenseInfo || 'N/A'} />
-              <DetailRow label="Notes" value={selectedDriver.notes || 'No notes'} />
+        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/80 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+          <div className="flex h-full min-h-0 flex-col p-5">
+            <div className="mb-4 shrink-0">
+              <h3 className="text-base font-semibold text-zinc-100">Driver Details</h3>
             </div>
-          ) : (
-            <div className="mt-4 rounded-lg border border-dashed border-zinc-300 px-4 py-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-              Select a driver to view details.
+
+            <div className="dashboard-scrollbar flex-1 min-h-0 overflow-y-auto pr-1">
+              {selectedDriver ? (
+                <div className="space-y-4 text-sm text-zinc-300">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 shadow-[0_12px_30px_rgba(0,0,0,0.22)]">
+                    <div className="flex items-start gap-4">
+                      <DriverAvatar driver={selectedDriver} size="lg" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xl font-semibold text-zinc-100">{selectedDriver.name}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <DetailChip>{getDriverTypeLabel(selectedDriver.driverType as never)}</DetailChip>
+                          <DetailChip tone="muted">{getDriverCodeValue(selectedDriver)}</DetailChip>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 md:grid-cols-2">
+                    <DetailRow label="Phone" value={selectedDriver.phone} />
+                    <DetailRow label="Email" value={selectedDriver.email || 'Not provided'} />
+                    <DetailRow label="License" value={selectedDriver.licenseInfo || 'N/A'} />
+                    <DetailRow label="Notes" value={selectedDriver.notes || 'No notes'} />
+                  </div>
+
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+                    <div className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Quick Actions</div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <QuickActionButton onClick={() => startEditingDriver(selectedDriver)}>Edit Driver</QuickActionButton>
+                      <QuickActionButton onClick={() => void runDriverAction('toggle-active', selectedDriver)}>
+                        {selectedDriver.isActive ? 'Deactivate Driver' : 'Activate Driver'}
+                      </QuickActionButton>
+                      <QuickActionButton onClick={() => void updateDriver(selectedDriver.id, { availabilityStatus: 'AVAILABLE' })}>
+                        Mark Available
+                      </QuickActionButton>
+                      <QuickActionButton onClick={() => void updateDriver(selectedDriver.id, { availabilityStatus: 'BUSY' })}>
+                        Mark Busy
+                      </QuickActionButton>
+                      <QuickActionButton onClick={() => void runDriverAction('off-duty', selectedDriver)}>Mark Off Duty</QuickActionButton>
+                      <QuickActionButton tone="danger" onClick={() => void runDriverAction('remove', selectedDriver)}>
+                        Remove Driver
+                      </QuickActionButton>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-4 py-6 text-sm text-zinc-500">
+                  Select a driver to view details.
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </section>
       </div>
 
       {editingDriver ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/70 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
+          <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.4)]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                <h3 className="text-lg font-semibold text-zinc-100">
                   {editingDriver.id ? 'Edit Driver' : 'Add Driver'}
                 </h3>
-                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Update driver profile, availability, and outsourced company details.</p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {editingDriver.id ? 'Update driver profile and availability details.' : 'Add a new internal driver to the fleet.'}
+                </p>
               </div>
-              <button type="button" onClick={() => setEditingDriver(null)} className="text-zinc-500 hover:text-zinc-300">
-                Close
-              </button>
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               <Input label="Full Name" value={editingDriver.name} onChange={(value) => setEditingDriver({ ...editingDriver, name: value })} />
               <Input label="Phone" value={editingDriver.phone} onChange={(value) => setEditingDriver({ ...editingDriver, phone: value })} />
               <Input label="Email" value={editingDriver.email} onChange={(value) => setEditingDriver({ ...editingDriver, email: value })} />
-              <Select
-                label="Driver Type"
-                value={editingDriver.driverType}
-                onChange={(value) => setEditingDriver({ ...editingDriver, driverType: value as DriverFormState['driverType'] })}
-                options={[
-                  ['OWN', 'Own Driver'],
-                  ['THIRD_PARTY', 'Third Party Driver'],
-                  ['VENDOR', 'Vendor / Company'],
-                ]}
-              />
-              <Input label="Company Name" value={editingDriver.companyName} onChange={(value) => setEditingDriver({ ...editingDriver, companyName: value })} />
-              <Input label="Vehicle Number" value={editingDriver.vehicleNumber} onChange={(value) => setEditingDriver({ ...editingDriver, vehicleNumber: value })} />
-              <Select
-                label="Vehicle Type"
-                value={editingDriver.vehicleType}
-                onChange={(value) => setEditingDriver({ ...editingDriver, vehicleType: value as DriverFormState['vehicleType'] })}
-                options={[
-                  ['SEDAN', 'Sedan'],
-                  ['SUV', 'SUV'],
-                  ['VAN', 'Van'],
-                  ['LUXURY', 'Luxury'],
-                ]}
-              />
-              <Select
-                label="Availability"
-                value={editingDriver.availabilityStatus}
-                onChange={(value) => setEditingDriver({ ...editingDriver, availabilityStatus: value as DriverFormState['availabilityStatus'] })}
-                options={[
-                  ['AVAILABLE', 'Available'],
-                  ['BUSY', 'Busy'],
-                  ['OFFLINE', 'Offline'],
-                ]}
-              />
-              <Input label="License Info" value={editingDriver.licenseInfo} onChange={(value) => setEditingDriver({ ...editingDriver, licenseInfo: value })} />
-              <label className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={editingDriver.isActive}
-                  onChange={(event) => setEditingDriver({ ...editingDriver, isActive: event.target.checked })}
+              {editingDriver.id ? (
+                <Select
+                  label="Availability"
+                  value={editingDriver.availabilityStatus || 'OFFLINE'}
+                  onChange={(value) => setEditingDriver({ ...editingDriver, availabilityStatus: value as DriverFormState['availabilityStatus'] })}
+                  options={[
+                    ['AVAILABLE', 'Available'],
+                    ['BUSY', 'Busy'],
+                    ['OFFLINE', 'Offline'],
+                  ]}
                 />
-                Active driver
-              </label>
+              ) : null}
+              <Input label="License Info" value={editingDriver.licenseInfo} onChange={(value) => setEditingDriver({ ...editingDriver, licenseInfo: value })} />
               <label className="md:col-span-2">
-                <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-200">Notes</span>
+                <span className="mb-2 block text-sm font-medium text-zinc-200">Notes</span>
                 <textarea
                   rows={4}
                   value={editingDriver.notes}
                   onChange={(event) => setEditingDriver({ ...editingDriver, notes: event.target.value })}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </label>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setEditingDriver(null)} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-600 dark:text-zinc-200">
+              <button
+                type="button"
+                onClick={() => setEditingDriver(null)}
+                className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800"
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={isSubmitting}
                 onClick={saveDriver}
-                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+                className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
               >
                 {isSubmitting ? 'Saving...' : editingDriver.id ? 'Save Changes' : 'Create Driver'}
               </button>
@@ -344,21 +451,133 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-zinc-400">{label}</div>
-      <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-200">{value}</div>
+      <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">{label}</div>
+      <div className="mt-1 text-sm text-zinc-200">{value}</div>
     </div>
   );
+}
+
+function DriverAvatar({ driver, size = 'md' }: { driver: SerializedDriver; size?: 'md' | 'lg' }) {
+  const visualStatus = getDriverVisualStatus(driver);
+
+  return (
+    <div className={cn('relative shrink-0', size === 'lg' ? 'h-16 w-16' : 'h-12 w-12')}>
+      <div
+        className={cn(
+          'flex h-full w-full items-center justify-center rounded-full bg-zinc-800 font-semibold text-zinc-100 ring-1 ring-white/10',
+          size === 'lg' ? 'text-lg' : 'text-sm'
+        )}
+      >
+        {getDriverInitials(driver.name)}
+      </div>
+      <span
+        className={cn(
+          'absolute bottom-0 right-0 rounded-full border-2 border-zinc-950',
+          size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5',
+          visualStatus === 'AVAILABLE'
+            ? 'bg-emerald-500'
+            : visualStatus === 'BUSY'
+              ? 'bg-amber-500'
+              : 'bg-zinc-500'
+        )}
+      />
+    </div>
+  );
+}
+
+function DetailChip({ children, tone = 'brand' }: { children: string; tone?: 'brand' | 'muted' }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex rounded-full border px-3 py-1 text-xs font-medium',
+        tone === 'brand'
+          ? 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+          : 'border-zinc-700 bg-zinc-950 text-zinc-300'
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ActionMenuItem({
+  label,
+  onClick,
+  tone = 'default',
+}: {
+  label: string;
+  onClick: () => void;
+  tone?: 'default' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full rounded-xl px-3 py-2 text-left text-sm transition-colors',
+        tone === 'danger' ? 'text-red-300 hover:bg-red-500/10' : 'text-zinc-300 hover:bg-zinc-900 hover:text-white'
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function QuickActionButton({
+  children,
+  onClick,
+  tone = 'default',
+}: {
+  children: string;
+  onClick: () => void;
+  tone?: 'default' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-xl border px-3 py-2 text-sm font-medium transition-colors',
+        tone === 'danger'
+          ? 'border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/15'
+          : 'border-zinc-700 bg-zinc-950 text-zinc-200 hover:border-zinc-600 hover:bg-zinc-900'
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function getDriverInitials(name: string) {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('');
+}
+
+function getDriverVisualStatus(driver: SerializedDriver) {
+  if (!driver.isActive) {
+    return 'OFFLINE';
+  }
+
+  return driver.availabilityStatus || 'OFFLINE';
+}
+
+function getDriverCodeValue(driver: SerializedDriver) {
+  return driver.driverCode || 'DRV-0000';
 }
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label>
-      <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-200">{label}</span>
+      <span className="mb-2 block text-sm font-medium text-zinc-200">{label}</span>
       <input
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
       />
     </label>
   );
@@ -377,11 +596,11 @@ function Select({
 }) {
   return (
     <label>
-      <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-200">{label}</span>
+      <span className="mb-2 block text-sm font-medium text-zinc-200">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
       >
         {options.map(([optionValue, optionLabel]) => (
           <option key={optionValue} value={optionValue}>

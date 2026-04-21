@@ -11,6 +11,7 @@ const dispatchUpdateSchema = z.object({
   driverId: z.string().min(1).nullable().optional(),
   vendorId: z.string().min(1).nullable().optional(),
   vehicleId: z.string().min(1).nullable().optional(),
+  carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).optional(),
   status: z.enum(BOOKING_STATUSES).optional(),
   paymentStatus: z.enum(PAYMENT_STATUSES).optional(),
   fareAmount: moneyField,
@@ -138,6 +139,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (result.data.vehicleId !== undefined) {
       data.vehicleId = result.data.vehicleId;
+    }
+
+    if (result.data.carType !== undefined) {
+      data.carType = result.data.carType;
     }
 
     if (result.data.manualVendorName !== undefined) {

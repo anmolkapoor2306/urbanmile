@@ -9,6 +9,19 @@ const statusUpdateSchema = z.object({
   status: z.enum(BOOKING_STATUSES),
 });
 
+function buildStatusUpdateData(status: (typeof BOOKING_STATUSES)[number]) {
+  const now = new Date();
+
+  return {
+    status,
+    confirmedAt: status === 'CONFIRMED' ? now : undefined,
+    startedAt: status === 'IN_PROGRESS' ? now : status === 'NEW' || status === 'CONFIRMED' || status === 'ASSIGNED' ? null : undefined,
+    completedAt: status === 'COMPLETED' ? now : null,
+    cancelledAt: status === 'CANCELLED' ? now : null,
+    archivedAt: status === 'COMPLETED' || status === 'CANCELLED' ? now : null,
+  };
+}
+
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const error = requireAdminAuth(request);
   if (error) return error;
@@ -37,30 +50,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       );
     }
 
-    const statusTimestamps: Record<string, Date | null | undefined> = {};
-
-    if (result.data.status === 'CONFIRMED') {
-      statusTimestamps.confirmedAt = new Date();
-    }
-
-    if (result.data.status === 'IN_PROGRESS') {
-      statusTimestamps.startedAt = new Date();
-    }
-
-    if (result.data.status === 'COMPLETED') {
-      statusTimestamps.completedAt = new Date();
-    }
-
-    if (result.data.status === 'CANCELLED') {
-      statusTimestamps.cancelledAt = new Date();
-    }
-
     const booking = await prisma.booking.update({
       where: { id },
-      data: {
-        status: result.data.status,
-        ...statusTimestamps,
-      },
+      data: buildStatusUpdateData(result.data.status),
       select: bookingRecordSelect,
     });
 

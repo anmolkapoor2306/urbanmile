@@ -38,8 +38,8 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100');
 
     const where = status && BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])
-      ? { status: status as (typeof BOOKING_STATUSES)[number] }
-      : {};
+      ? { status: status as (typeof BOOKING_STATUSES)[number], archivedAt: null }
+      : { archivedAt: null };
 
     const bookings = await prisma.booking.findMany({
       where,

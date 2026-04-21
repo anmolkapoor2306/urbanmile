@@ -37,7 +37,7 @@ export const getBookings = async (status?: 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'I
       select: bookingRecordSelect,
       take: limit,
       orderBy: { createdAt: 'desc' },
-      ...(status ? { where: { status } } : {}),
+      where: status ? { status, archivedAt: null } : { archivedAt: null },
     });
     return { success: true, data: bookings };
   } catch (error) {

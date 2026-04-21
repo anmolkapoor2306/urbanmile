@@ -28,6 +28,7 @@ export default async function DispatchPage() {
 
   try {
     bookings = await prisma.booking.findMany({
+      where: { archivedAt: null },
       select: bookingRecordSelect,
       orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
       take: 1000,

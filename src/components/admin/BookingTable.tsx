@@ -1,11 +1,11 @@
 'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BOOKING_STATUSES, getBookingStatusLabel } from '@/lib/dispatch';
+import { adminInputClassName, adminInsetClassName, adminSecondaryButtonClassName } from '@/components/admin/AdminLayout';
+import type { BookingStatusValue } from '@/lib/dispatch';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
-import { getCarTypeDisplay } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 export interface AdminBooking {
   id: string;
@@ -33,57 +33,161 @@ export interface AdminBooking {
   manualVendorName?: string | null;
   manualDriverName?: string | null;
   createdAt: string;
+  archivedAt?: string | null;
 }
+
+const vehicleTypeOptions: Array<{ value: string; label: string }> = [
+  { value: 'SEDAN', label: 'Sedan' },
+  { value: 'SUV', label: 'MUV / SUV' },
+  { value: 'VAN', label: 'Large Vehicle' },
+  { value: 'LUXURY', label: 'Premium Vehicle' },
+];
+
+const STATUS_PILLS: Array<{
+  value: Exclude<BookingStatusValue, 'IN_PROGRESS'>;
+  label: string;
+  activeClassName: string;
+  inactiveClassName: string;
+}> = [
+  {
+    value: 'NEW',
+    label: 'New/Unassigned',
+    activeClassName: 'bg-amber-500 text-white dark:bg-amber-600',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+  },
+  {
+    value: 'CONFIRMED',
+    label: 'Confirmed',
+    activeClassName: 'bg-blue-500 text-white dark:bg-blue-600',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+  },
+  {
+    value: 'ASSIGNED',
+    label: 'Assigned',
+    activeClassName: 'bg-violet-500 text-white dark:bg-violet-600',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+  },
+  {
+    value: 'COMPLETED',
+    label: 'Complete',
+    activeClassName: 'bg-green-500 text-white dark:bg-green-600',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+  },
+  {
+    value: 'CANCELLED',
+    label: 'Cancelled',
+    activeClassName: 'bg-red-500 text-white dark:bg-red-600',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+  },
+];
+
+const statusPillBaseClassName =
+  'inline-flex min-h-9 items-center justify-center rounded-full px-3 py-2 text-xs font-semibold leading-none transition-colors disabled:opacity-60';
 
 export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [pickupDateSort, setPickupDateSort] = useState<'newest' | 'oldest'>('newest');
+  const [showArchived, setShowArchived] = useState(false);
 
-  const filteredBookings = bookings.filter((booking) => {
-    const matchesStatus = filterStatus === 'all' || booking.status === filterStatus;
+  const filteredBookings = useMemo(() => {
     const query = searchQuery.toLowerCase();
 
-    const matchesSearch =
-      booking.bookingReference.toLowerCase().includes(query) ||
-      booking.fullName.toLowerCase().includes(query) ||
-      booking.phone.includes(searchQuery) ||
-      booking.pickupLocation.toLowerCase().includes(query) ||
-      booking.dropoffLocation.toLowerCase().includes(query) ||
-      getBookingDisplayAssignee(booking).toLowerCase().includes(query);
+    return [...bookings]
+      .filter((booking) => {
+        const matchesArchive = showArchived ? booking.archivedAt !== null : booking.archivedAt === null;
+        const matchesStatus = filterStatus === 'all' || booking.status === filterStatus;
 
-    return matchesStatus && matchesSearch;
-  });
+        const matchesSearch =
+          booking.bookingReference.toLowerCase().includes(query) ||
+          booking.fullName.toLowerCase().includes(query) ||
+          booking.phone.includes(searchQuery) ||
+          booking.pickupLocation.toLowerCase().includes(query) ||
+          booking.dropoffLocation.toLowerCase().includes(query) ||
+          getBookingDisplayAssignee(booking).toLowerCase().includes(query);
+
+        return matchesArchive && matchesStatus && matchesSearch;
+      })
+      .sort((left, right) => {
+        const leftPickup = getPickupDateTimeValue(left.pickupDateTime);
+        const rightPickup = getPickupDateTimeValue(right.pickupDateTime);
+
+        return pickupDateSort === 'newest' ? rightPickup - leftPickup : leftPickup - rightPickup;
+      });
+  }, [bookings, filterStatus, pickupDateSort, searchQuery, showArchived]);
 
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-      <div className="shrink-0 p-2">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className={cn(adminInsetClassName, 'shrink-0 p-4')}>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <input
             type="text"
             placeholder="Search by booking, customer, phone, route, or assigned driver"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:flex-1"
+            className={cn(adminInputClassName, 'md:flex-1')}
           />
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-900 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-[220px]"
-          >
-            <option value="all">All Statuses</option>
-            <option value="NEW">New</option>
-            <option value="CONFIRMED">Confirmed</option>
-            <option value="ASSIGNED">Assigned</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+          <div className="flex flex-col gap-3 sm:flex-row md:shrink-0">
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className={cn(adminInputClassName, 'md:w-[220px]')}
+            >
+              <option value="all">All Statuses</option>
+              <option value="NEW">New</option>
+              <option value="CONFIRMED">Confirmed</option>
+              <option value="ASSIGNED">Assigned</option>
+              <option value="IN_PROGRESS">Active</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+
+            <select
+              value={pickupDateSort}
+              onChange={(e) => setPickupDateSort(e.target.value as 'newest' | 'oldest')}
+              className={cn(adminInputClassName, 'md:w-[240px]')}
+            >
+              <option value="newest">Latest Pickup First</option>
+              <option value="oldest">Earliest Pickup First</option>
+            </select>
+
+            <div className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-950 p-1">
+              <button
+                type="button"
+                onClick={() => setShowArchived(false)}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+                  !showArchived
+                    ? 'bg-zinc-100 text-zinc-950'
+                    : 'text-zinc-400 hover:text-zinc-100'
+                )}
+              >
+                Active
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowArchived(true)}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+                  showArchived
+                    ? 'bg-zinc-100 text-zinc-950'
+                    : 'text-zinc-400 hover:text-zinc-100'
+                )}
+              >
+                Archived
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 text-sm text-zinc-500">
+          {filteredBookings.length} {showArchived ? 'archived' : 'active'} booking{filteredBookings.length !== 1 ? 's' : ''}
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-2">
+      <div className="dashboard-scrollbar mt-4 flex-1 min-h-0 overflow-y-auto pr-1">
         {filteredBookings.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
+          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-6 py-10 text-center text-sm text-zinc-500">
             No bookings found
           </div>
         ) : (
@@ -101,9 +205,40 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 function BookingCard({ booking }: { booking: AdminBooking }) {
   const router = useRouter();
   const [selectedStatus, setSelectedStatus] = useState(booking.status);
+  const [selectedCarType, setSelectedCarType] = useState(booking.carType);
   const [fareValue, setFareValue] = useState(booking.fareAmount?.toString() ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [archiveState, setArchiveState] = useState<{
+    previousStatus: string;
+    nextStatus: 'COMPLETED' | 'CANCELLED';
+  } | null>(null);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) {
+        clearTimeout(fadeTimerRef.current);
+      }
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, []);
+
+  function clearArchiveTimers() {
+    if (fadeTimerRef.current) {
+      clearTimeout(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+    }
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }
 
   async function updateDispatch(payload: Record<string, unknown>) {
     setIsSaving(true);
@@ -121,14 +256,21 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
       }
 
       router.refresh();
+      return true;
     } catch (error) {
       alert((error as Error).message);
+      return false;
     } finally {
       setIsSaving(false);
     }
   }
 
   async function updateStatus(nextStatus: string) {
+    if (nextStatus === 'CANCELLED' && !confirm('Cancel this booking and move it to archive?')) {
+      return;
+    }
+
+    const previousStatus = selectedStatus;
     setSelectedStatus(nextStatus);
     setIsSaving(true);
 
@@ -144,10 +286,57 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
         throw new Error(data.error || 'Failed to update booking status');
       }
 
+      if (nextStatus === 'COMPLETED' || nextStatus === 'CANCELLED') {
+        clearArchiveTimers();
+        setArchiveState({ previousStatus, nextStatus });
+        setIsFadingOut(false);
+
+        fadeTimerRef.current = setTimeout(() => {
+          setIsFadingOut(true);
+        }, 2400);
+
+        hideTimerRef.current = setTimeout(() => {
+          setIsHidden(true);
+          router.refresh();
+        }, 2900);
+        return;
+      }
+
+      setArchiveState(null);
+      setIsFadingOut(false);
       router.refresh();
     } catch (error) {
       alert((error as Error).message);
-      setSelectedStatus(booking.status);
+      setSelectedStatus(previousStatus);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function undoArchive() {
+    if (!archiveState) return;
+
+    clearArchiveTimers();
+    setIsSaving(true);
+
+    try {
+      const response = await fetch(`/api/bookings/${booking.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: archiveState.previousStatus }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to restore booking');
+      }
+
+      setSelectedStatus(archiveState.previousStatus);
+      setArchiveState(null);
+      setIsFadingOut(false);
+      router.refresh();
+    } catch (error) {
+      alert((error as Error).message);
     } finally {
       setIsSaving(false);
     }
@@ -171,22 +360,73 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
     }
   }
 
+  async function updateCarType(nextCarType: string) {
+    const previousCarType = selectedCarType;
+    setSelectedCarType(nextCarType);
+
+    const success = await updateDispatch({ carType: nextCarType });
+    if (!success) {
+      setSelectedCarType(previousCarType);
+    }
+  }
+
+  async function saveFare() {
+    if (parsedFare === null || Number.isNaN(parsedFare)) {
+      alert('Enter the fare first.');
+      return;
+    }
+
+    await updateDispatch({
+      fareAmount: parsedFare,
+      status: booking.status === 'NEW' ? 'CONFIRMED' : booking.status,
+    });
+  }
+
   const parsedFare = fareValue.trim() === '' ? null : Number(fareValue);
+  const activePillStatus = selectedStatus === 'IN_PROGRESS' ? 'ASSIGNED' : selectedStatus;
+
+  if (isHidden) {
+    return null;
+  }
 
   return (
-    <article className="w-full rounded-xl border border-zinc-200 bg-white px-6 py-4 shadow-sm transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600">
+    <article className={cn(
+      'w-full rounded-2xl border border-zinc-800 bg-zinc-950/70 px-6 py-4 shadow-[0_12px_32px_rgba(0,0,0,0.18)] transition-all duration-500 hover:border-zinc-700',
+      isFadingOut && 'pointer-events-none -translate-y-2 opacity-0'
+    )}>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{toTitleCase(booking.fullName)}</div>
-            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-start">
+          <div className="min-w-0 xl:justify-self-start">
+            <div className="text-base font-bold text-zinc-100">{toTitleCase(booking.fullName)}</div>
+            <div className="mt-1 text-sm text-zinc-500">
               {booking.phone}
             </div>
           </div>
 
-          <div className="text-right">
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{booking.bookingReference}</div>
-            <div className="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          <div className="flex flex-wrap items-center justify-center gap-2 xl:self-start">
+            {STATUS_PILLS.map((statusPill) => {
+              const isActive = activePillStatus === statusPill.value;
+
+              return (
+                <button
+                  key={statusPill.value}
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => void updateStatus(statusPill.value)}
+                  className={cn(
+                    statusPillBaseClassName,
+                    isActive ? statusPill.activeClassName : statusPill.inactiveClassName
+                  )}
+                >
+                  {statusPill.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-left xl:justify-self-end xl:self-start xl:text-right">
+            <div className="text-sm font-semibold text-zinc-100">{booking.bookingReference}</div>
+            <div className="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500">
               {formatDate(booking.createdAt)}
             </div>
           </div>
@@ -194,116 +434,75 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 
         <div className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
           <Info label="Route" value={`${booking.pickupLocation} → ${booking.dropoffLocation}`} />
-          <Info label="Pickup Time" value={`${formatDate(booking.pickupDateTime)} · ${formatTime(booking.pickupDateTime)}`} />
-          <Info label="Vehicle Type" value={getCarTypeDisplay(booking.carType)} />
+          <Info label="Pickup" value={formatPickupDateTimeDisplay(booking.pickupDateTime)} />
+          <label>
+            <span className="text-xs uppercase tracking-wide text-zinc-500">Vehicle Type</span>
+            <select
+              value={selectedCarType}
+              onChange={(event) => void updateCarType(event.target.value)}
+              disabled={isSaving}
+              className="mt-1 w-full max-w-[190px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              {vehicleTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <Info label="Assigned Driver" value={getBookingDisplayAssignee(booking)} />
-          <Info label="Confirmed Fare" value={booking.fareAmount ? formatMoney(booking.fareAmount) : 'Pending'} />
-          <Info label="Status" value={getBookingStatusLabel(booking.status as (typeof BOOKING_STATUSES)[number])} />
         </div>
 
         {booking.specialInstructions ? (
-          <div className="rounded-lg bg-zinc-50 px-4 py-3 text-sm text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-500">
             Note: {booking.specialInstructions}
           </div>
         ) : null}
 
-        <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
-          <label>
-            <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">Fare</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={fareValue}
-              onChange={(event) => setFareValue(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            />
-          </label>
-
-          <div className="flex flex-wrap items-end gap-2">
+        {archiveState ? (
+          <div className="flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 sm:flex-row sm:items-center sm:justify-between">
+            <span>Moved to archive.</span>
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => {
-                if (parsedFare === null || Number.isNaN(parsedFare)) {
-                  alert('Enter the fare first.');
-                  return;
-                }
-
-                void updateDispatch({
-                  fareAmount: parsedFare,
-                  status: booking.status === 'NEW' ? 'CONFIRMED' : booking.status,
-                });
-              }}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+              onClick={() => void undoArchive()}
+              className="shrink-0 rounded-xl border border-emerald-500/30 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:opacity-60"
             >
-              {booking.status === 'NEW' ? 'Confirm + Fare' : 'Save Fare'}
+              Undo
+            </button>
+          </div>
+        ) : null}
+
+        <div className="border-t border-zinc-800 pt-4">
+          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[minmax(0,220px)_auto] sm:items-center sm:justify-between">
+            <label className="block max-w-[220px]">
+              <span className="text-xs uppercase tracking-wide text-zinc-500">Fare</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={fareValue}
+                onChange={(event) => setFareValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void saveFare();
+                  }
+                }}
+                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => void handleDelete()}
+              className="justify-self-end rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-60"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
             </button>
 
-            <Link
-              href="/admin/dispatch"
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            >
-              Assign
-            </Link>
-
-            {booking.status === 'ASSIGNED' ? (
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() => void updateStatus('IN_PROGRESS')}
-                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                Start
-              </button>
-            ) : null}
-
-            {booking.status === 'IN_PROGRESS' ? (
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() => void updateStatus('COMPLETED')}
-                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                Complete
-              </button>
-            ) : null}
-
-            {booking.status !== 'COMPLETED' && booking.status !== 'CANCELLED' ? (
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() => void updateStatus('CANCELLED')}
-                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/40"
-              >
-                Cancel
-              </button>
-            ) : null}
+            <div className="text-xs text-zinc-500 sm:col-start-1">Press Enter to save fare changes.</div>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <select
-            value={selectedStatus}
-            onChange={(event) => void updateStatus(event.target.value)}
-            disabled={isSaving}
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-          >
-            {BOOKING_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {getBookingStatusLabel(status)}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            disabled={isDeleting}
-            onClick={() => void handleDelete()}
-            className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-60"
-          >
-            {isDeleting ? 'Deleting...' : 'Delete'}
-          </button>
         </div>
       </div>
     </article>
@@ -313,18 +512,10 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-zinc-400">{label}</div>
-      <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-200">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-1 text-sm text-zinc-200">{value}</div>
     </div>
   );
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(value);
 }
 
 function formatDate(value: string) {
@@ -335,11 +526,31 @@ function formatDate(value: string) {
   });
 }
 
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString('en-IN', {
-    hour: '2-digit',
+function getPickupDateTimeValue(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function formatPickupDateTimeDisplay(value: string) {
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return value;
+  }
+
+  const time = parsedDate.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
+  }).toUpperCase();
+
+  const date = parsedDate.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
   });
+
+  return `${time} - ${date}`;
 }
 
 function toTitleCase(value: string) {

@@ -1,33 +1,35 @@
 import Link from 'next/link';
+import { AdminPanel, AdminStatCard, AdminStatsGrid, adminInsetClassName, adminSecondaryButtonClassName } from '@/components/admin/AdminLayout';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import { buildBookingMetrics, getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { getBookingStatusLabel } from '@/lib/dispatch';
+import { cn } from '@/lib/utils';
 import { getCarTypeDisplay, getStatusColor } from '@/lib/utils';
 
 export function MainDashboard({ bookings }: { bookings: SerializedBooking[] }) {
   const metrics = buildBookingMetrics(bookings);
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+    <div className="flex flex-1 min-h-0 flex-col gap-6 overflow-hidden">
+      <AdminStatsGrid className="md:grid-cols-4 xl:grid-cols-7">
         {[
           { label: 'Total Bookings', value: metrics.total },
           { label: 'Pending Confirmation', value: metrics.pendingConfirmation },
           { label: 'Confirmed', value: metrics.confirmed },
           { label: 'Assigned', value: metrics.assigned },
-          { label: 'In Progress', value: metrics.inProgress },
+          { label: 'Active Trips', value: metrics.inProgress },
           { label: 'Completed Today', value: metrics.completedToday },
           { label: 'Cancelled', value: metrics.cancelled },
         ].map((item) => (
           <MetricCard key={item.label} label={item.label} value={item.value} />
         ))}
-      </div>
+      </AdminStatsGrid>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
+      <AdminPanel className="shrink-0 p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Revenue Snapshot</h2>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">A quick financial pulse without leaving the operations workflow.</p>
+            <h2 className="text-lg font-semibold text-zinc-100">Revenue Snapshot</h2>
+            <p className="mt-1 text-sm text-zinc-500">A quick financial pulse without leaving the operations workflow.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4 lg:min-w-[480px] lg:grid-cols-4">
@@ -37,9 +39,9 @@ export function MainDashboard({ bookings }: { bookings: SerializedBooking[] }) {
             <RevenueMetric label="Unpaid" value={metrics.unpaidAmount ?? 0} />
           </div>
         </div>
-      </section>
+      </AdminPanel>
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid flex-1 min-h-0 gap-6 overflow-hidden xl:grid-cols-3">
         <QueuePanel
           title="Bookings"
           subtitle="Customers waiting for a fare confirmation call."
@@ -47,7 +49,6 @@ export function MainDashboard({ bookings }: { bookings: SerializedBooking[] }) {
           emptyMessage="No new bookings waiting for confirmation."
           actionHref="/admin/bookings"
           actionLabel="Open Bookings"
-          scrollable
           centeredHeader
           hideActionButton
         />
@@ -79,19 +80,14 @@ export function MainDashboard({ bookings }: { bookings: SerializedBooking[] }) {
 }
 
 function MetricCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-800">
-      <div className="text-sm text-zinc-500 dark:text-zinc-400">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{value}</div>
-    </div>
-  );
+  return <AdminStatCard label={label} value={value} />;
 }
 
 function RevenueMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-      <div className="text-xs uppercase tracking-wide text-zinc-400">{label}</div>
-      <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{formatMoney(value)}</div>
+    <div className={cn(adminInsetClassName, 'p-4')}>
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-2 text-lg font-semibold text-zinc-100">{formatMoney(value)}</div>
     </div>
   );
 }
@@ -103,7 +99,6 @@ function QueuePanel({
   emptyMessage,
   actionHref,
   actionLabel,
-  scrollable = false,
   centeredHeader = false,
   hideActionButton = false,
 }: {
@@ -113,21 +108,20 @@ function QueuePanel({
   emptyMessage: string;
   actionHref: string;
   actionLabel: string;
-  scrollable?: boolean;
   centeredHeader?: boolean;
   hideActionButton?: boolean;
 }) {
   return (
-    <section className={`rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-800${scrollable ? ' flex h-[32rem] flex-col' : ''}`}>
-      <div className={`mb-4 flex items-start gap-4${centeredHeader ? ' justify-center text-center' : ' justify-between'}`}>
+    <AdminPanel className="flex min-h-0 flex-col overflow-hidden p-5">
+      <div className={`mb-4 flex shrink-0 items-start gap-4${centeredHeader ? ' justify-center text-center' : ' justify-between'}`}>
         <Link href={actionHref} className="group block min-w-0">
-          <h2 className="inline-block text-lg font-semibold text-zinc-900 transition-colors transition-transform duration-150 group-hover:scale-105 group-hover:text-amber-500 dark:text-zinc-100 dark:group-hover:text-amber-400">{title}</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p>
+          <h2 className="inline-block text-lg font-semibold text-zinc-100 transition-colors transition-transform duration-150 group-hover:scale-105 group-hover:text-amber-400">{title}</h2>
+          <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>
         </Link>
         {hideActionButton ? null : (
           <Link
             href={actionHref}
-            className="inline-flex rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className={cn(adminSecondaryButtonClassName, 'inline-flex')}
           >
             {actionLabel}
           </Link>
@@ -135,23 +129,23 @@ function QueuePanel({
       </div>
 
       {bookings.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-4 py-6 text-sm text-zinc-500">
           {emptyMessage}
         </div>
       ) : (
-        <div className={scrollable ? 'flex-1 min-h-0 overflow-y-auto space-y-3 pr-1' : 'space-y-3'}>
+        <div className="dashboard-scrollbar flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
           {bookings.map((booking) => (
-            <div key={booking.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <div key={booking.id} className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1.5">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{booking.bookingReference}</div>
-                  <div className="truncate text-sm text-zinc-900 dark:text-zinc-100">
+                  <div className="text-sm font-semibold text-zinc-100">{booking.bookingReference}</div>
+                  <div className="truncate text-sm text-zinc-100">
                     {booking.pickupLocation} to {booking.dropoffLocation}
                   </div>
-                  <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                  <div className="text-sm text-zinc-500">
                     {booking.fullName} · {formatDateTime(booking.pickupDateTime)} · {getCarTypeDisplay(booking.carType)}
                   </div>
-                  <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                  <div className="text-sm text-zinc-500">
                     Fare {booking.fareAmount ? formatMoney(booking.fareAmount) : 'Pending'} · {getBookingDisplayAssignee(booking)}
                   </div>
                 </div>
@@ -164,7 +158,7 @@ function QueuePanel({
           ))}
         </div>
       )}
-    </section>
+    </AdminPanel>
   );
 }
 

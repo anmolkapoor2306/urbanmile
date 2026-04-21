@@ -14,18 +14,24 @@ export async function generateDriverCode(
   const prefix =
     driverType === DriverType.THIRD_PARTY ? 'TDRV' : driverType === DriverType.VENDOR ? 'VNDR' : 'DRV';
 
-  const last = await db.driver.findFirst({
+  const existingCodes = await db.driver.findMany({
     where: { driverType },
-    orderBy: { driverCode: 'desc' },
     select: { driverCode: true },
   });
 
-  if (last?.driverCode) {
-    const suffix = parseInt(last.driverCode.split('-')[1], 10);
-    return formatCode(prefix, suffix + 1);
-  }
+  const codePattern = new RegExp(`^${prefix}-(\\d+)$`);
+  const nextSequence =
+    existingCodes.reduce((max, { driverCode }) => {
+      if (!driverCode) return max;
 
-  return formatCode(prefix, 1);
+      const match = driverCode.match(codePattern);
+      if (!match) return max;
+
+      const suffix = Number.parseInt(match[1], 10);
+      return Number.isNaN(suffix) ? max : Math.max(max, suffix);
+    }, 0) + 1;
+
+  return formatCode(prefix, nextSequence);
 }
 
 export async function backfillDriverCodes(

@@ -62,12 +62,8 @@ export interface Driver {
   name: string;
   phone: string;
   email?: string | null;
-  vehicleType: CarType;
-  vehicleNumber: string;
-  isActive: boolean;
   driverType: DriverType;
   availabilityStatus?: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
-  companyName?: string | null;
   licenseInfo?: string | null;
   notes?: string | null;
 }

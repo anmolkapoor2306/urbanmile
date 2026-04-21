@@ -15,7 +15,7 @@ export const dispatchGroups: Array<{
   { key: 'NEW', title: 'New Requests' },
   { key: 'CONFIRMED', title: 'Confirmed' },
   { key: 'ASSIGNED', title: 'Assigned / Upcoming' },
-  { key: 'IN_PROGRESS', title: 'In Progress' },
+  { key: 'IN_PROGRESS', title: 'Active' },
   { key: 'COMPLETED', title: 'Completed' },
   { key: 'CANCELLED', title: 'Cancelled' },
 ];
@@ -25,7 +25,7 @@ export function getBookingStatusLabel(status: BookingStatusValue): string {
     NEW: 'New',
     CONFIRMED: 'Confirmed',
     ASSIGNED: 'Assigned',
-    IN_PROGRESS: 'In Progress',
+    IN_PROGRESS: 'Active',
     COMPLETED: 'Complete',
     CANCELLED: 'Cancelled',
   };

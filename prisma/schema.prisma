@@ -42,6 +42,7 @@ model Booking {
   startedAt             DateTime?
   completedAt           DateTime?
   cancelledAt           DateTime?
+  archivedAt            DateTime?
   cancelReason          String?
   fareAmount            Decimal?               @db.Decimal(10, 2)
   commissionAmount      Decimal?               @db.Decimal(10, 2)
@@ -63,6 +64,7 @@ model Booking {
   @@index([vendorId])
   @@index([vehicleId])
   @@index([paymentStatus])
+  @@index([archivedAt])
 }
 
 model Driver {
