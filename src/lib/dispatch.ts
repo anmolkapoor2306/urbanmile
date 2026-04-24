@@ -1,4 +1,4 @@
-export const BOOKING_STATUSES = ['NEW', 'CONFIRMED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
+export const BOOKING_STATUSES = ['NEW', 'CONFIRMED', 'ASSIGNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const;
 export const DRIVER_TYPES = ['OWN', 'THIRD_PARTY', 'VENDOR'] as const;
 export const PAYMENT_STATUSES = ['UNPAID', 'PARTIAL', 'PAID'] as const;
 export const ASSIGNMENT_TYPES = ['OWN_DRIVER', 'OUTSOURCED_DRIVER', 'MANUAL_OUTSOURCED'] as const;
@@ -15,7 +15,7 @@ export const dispatchGroups: Array<{
   { key: 'NEW', title: 'New Requests' },
   { key: 'CONFIRMED', title: 'Confirmed' },
   { key: 'ASSIGNED', title: 'Assigned / Upcoming' },
-  { key: 'IN_PROGRESS', title: 'Active' },
+  { key: 'ACTIVE', title: 'Active' },
   { key: 'COMPLETED', title: 'Completed' },
   { key: 'CANCELLED', title: 'Cancelled' },
 ];
@@ -25,7 +25,7 @@ export function getBookingStatusLabel(status: BookingStatusValue): string {
     NEW: 'New',
     CONFIRMED: 'Confirmed',
     ASSIGNED: 'Assigned',
-    IN_PROGRESS: 'Active',
+    ACTIVE: 'Active',
     COMPLETED: 'Complete',
     CANCELLED: 'Cancelled',
   };

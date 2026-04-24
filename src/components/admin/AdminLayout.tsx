@@ -24,11 +24,11 @@ export function AdminPageFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <DashboardHeader currentPage={currentPage} />
 
-      <main className="flex min-h-0 min-w-0 w-full flex-1 overflow-hidden flex-col">
-        <div className="flex h-full w-full flex-1 min-h-0 min-w-0 flex-col overflow-hidden px-6 py-6 lg:px-8">
+      <main className="flex flex-1 w-full min-h-0 min-w-0 overflow-hidden">
+        <div className="flex flex-1 w-full h-full min-h-0 min-w-0 flex-col px-6 py-6 lg:px-8 overflow-hidden">
           {children}
         </div>
       </main>
@@ -50,7 +50,7 @@ export function AdminStatCard({
   className?: string;
 }) {
   return (
-    <div className={cn(adminPanelClassName, 'p-4', className)}>
+    <div className={cn(adminPanelClassName, 'p-4 flex flex-col justify-center items-center text-center', className)}>
       <div className="text-sm text-zinc-500">{label}</div>
       <div className="mt-2 text-2xl font-semibold text-zinc-100">{value}</div>
     </div>

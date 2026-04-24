@@ -31,7 +31,7 @@ export const createBooking = async (input: CreateBookingInput) => {
   }
 };
 
-export const getBookings = async (status?: 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED', limit = 100) => {
+export const getBookings = async (status?: 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED', limit = 100) => {
   try {
     const bookings = await prisma.booking.findMany({
       select: bookingRecordSelect,

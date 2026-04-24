@@ -5,7 +5,7 @@ export function getStatusColor(status: BookingStatusValue): string {
     NEW: 'bg-amber-500 text-white dark:bg-amber-600 dark:text-white',
     CONFIRMED: 'bg-blue-500 text-white dark:bg-blue-600 dark:text-white',
     ASSIGNED: 'bg-violet-500 text-white dark:bg-violet-600 dark:text-white',
-    IN_PROGRESS: 'bg-yellow-500 text-white dark:bg-yellow-600 dark:text-white',
+    ACTIVE: 'bg-yellow-500 text-white dark:bg-yellow-600 dark:text-white',
     COMPLETED: 'bg-green-500 text-white dark:bg-green-600 dark:text-white',
     CANCELLED: 'bg-red-500 text-white dark:bg-red-600 dark:text-white',
   };
@@ -18,7 +18,7 @@ export function getStatusBadgeVariant(status: BookingStatusValue): string {
     NEW: 'orange',
     CONFIRMED: 'blue',
     ASSIGNED: 'purple',
-    IN_PROGRESS: 'yellow', 
+    ACTIVE: 'yellow', 
     COMPLETED: 'green',
     CANCELLED: 'red',
   };

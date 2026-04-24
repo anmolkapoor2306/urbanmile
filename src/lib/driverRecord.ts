@@ -38,8 +38,7 @@ export function serializeDriver(driver: DriverRecord) {
     name: driver.name,
     phone: driver.phone,
     email: driver.email,
-    vehicleType: driver.vehicleType,
-    vehicleNumber: driver.vehicleNumber,
+    // Removed vehicleType and vehicleNumber - vehicles are assigned dynamically at dispatch time
     isActive: driver.isActive,
     driverType: driver.driverType,
     availabilityStatus: driver.availabilityStatus,

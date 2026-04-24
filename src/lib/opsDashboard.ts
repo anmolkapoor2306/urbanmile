@@ -55,7 +55,7 @@ export function buildBookingMetrics(bookings: SerializedBooking[]) {
 
   const todaysBookings = bookings.filter((booking) => isSameDay(new Date(booking.createdAt), now));
   const unpaidBookings = bookings.filter((booking) => booking.paymentStatus !== 'PAID');
-  const activeTrips = bookings.filter((booking) => booking.status === 'ASSIGNED' || booking.status === 'IN_PROGRESS');
+  const activeTrips = bookings.filter((booking) => booking.status === 'ASSIGNED' || booking.status === 'ACTIVE');
 
   return {
     total: bookings.length,
@@ -63,7 +63,7 @@ export function buildBookingMetrics(bookings: SerializedBooking[]) {
     pendingConfirmation: bookings.filter((booking) => booking.status === 'NEW').length,
     confirmed: bookings.filter((booking) => booking.status === 'CONFIRMED').length,
     assigned: bookings.filter((booking) => booking.status === 'ASSIGNED').length,
-    inProgress: bookings.filter((booking) => booking.status === 'IN_PROGRESS').length,
+    inProgress: bookings.filter((booking) => booking.status === 'ACTIVE').length,
     completed: bookings.filter((booking) => booking.status === 'COMPLETED').length,
     completedToday: completedToday.length,
     cancelled: bookings.filter((booking) => booking.status === 'CANCELLED').length,

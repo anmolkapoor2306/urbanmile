@@ -15,7 +15,7 @@ function buildStatusUpdateData(status: (typeof BOOKING_STATUSES)[number]) {
   return {
     status,
     confirmedAt: status === 'CONFIRMED' ? now : undefined,
-    startedAt: status === 'IN_PROGRESS' ? now : status === 'NEW' || status === 'CONFIRMED' || status === 'ASSIGNED' ? null : undefined,
+    startedAt: status === 'ACTIVE' ? now : status === 'NEW' || status === 'CONFIRMED' || status === 'ASSIGNED' ? null : undefined,
     completedAt: status === 'COMPLETED' ? now : null,
     cancelledAt: status === 'CANCELLED' ? now : null,
     archivedAt: status === 'COMPLETED' || status === 'CANCELLED' ? now : null,
@@ -61,13 +61,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       message: 'Booking status updated successfully',
       data: serializeBooking(booking),
     });
-  } catch (error) {
-    console.error('Error updating booking status:', error);
-    return NextResponse.json(
-      { error: 'Failed to update booking status' },
-      { status: 500 }
-    );
-  }
+    } catch (error) {
+      console.error('🐛 Detailed error updating booking status:', error);
+      console.log('📌 error.message:', (error as Error)?.message);
+      console.log('📌 error.stack:', (error as Error)?.stack);
+      return NextResponse.json(
+        { error: 'Failed to update booking status', details: (error as Error)?.message },
+        { status: 500 }
+      );
+    }
 }
 
 export const dynamic = 'force-dynamic';

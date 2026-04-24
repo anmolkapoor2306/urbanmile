@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
-import { cn } from '@/lib/utils';
+import { cn, toTitleCase } from '@/lib/utils';
 
 type DriverFormState = {
   id?: string;
@@ -259,7 +259,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
                         <DriverAvatar driver={driver} />
 
                         <div className="min-w-0 flex-1 space-y-1.5">
-                          <div className="truncate text-sm font-semibold text-zinc-100">{driver.name}</div>
+                          <div className="truncate text-sm font-semibold text-zinc-100">{toTitleCase(driver.name)}</div>
                           <div className="truncate text-sm text-zinc-400">{driver.phone} • {driver.email || 'No email'}</div>
                           <div className="truncate text-xs font-medium text-zinc-500">
                             {getDriverTypeLabel(driver.driverType as never)} • {getDriverCodeValue(driver)}
@@ -286,7 +286,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
                                 setOpenMenuId((current) => (current === driver.id ? null : driver.id));
                               }}
                               className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-900 hover:text-white"
-                              aria-label={`More actions for ${driver.name}`}
+                              aria-label={`More actions for ${toTitleCase(driver.name)}`}
                             >
                               ⋮
                             </button>
@@ -336,7 +336,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
                     <div className="flex items-start gap-4">
                       <DriverAvatar driver={selectedDriver} size="lg" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-xl font-semibold text-zinc-100">{selectedDriver.name}</div>
+                         <div className="truncate text-xl font-semibold text-zinc-100">{toTitleCase(selectedDriver.name)}</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <DetailChip>{getDriverTypeLabel(selectedDriver.driverType as never)}</DetailChip>
                           <DetailChip tone="muted">{getDriverCodeValue(selectedDriver)}</DetailChip>
@@ -549,13 +549,15 @@ function QuickActionButton({
 }
 
 function getDriverInitials(name: string) {
-  return name
+  const normalizedName = toTitleCase(name);
+  return normalizedName
     .split(' ')
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || '')
     .join('');
 }
+
 
 function getDriverVisualStatus(driver: SerializedDriver) {
   if (!driver.isActive) {

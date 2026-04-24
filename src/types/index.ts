@@ -29,7 +29,7 @@ export interface BookingFormData {
   dropoffLocationSource?: BookingLocationMetadata['source'];
 }
 
-export type BookingStatus = 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+export type BookingStatus = 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 export type CarType = 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
 export type DriverType = 'OWN' | 'THIRD_PARTY' | 'VENDOR';
 export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';

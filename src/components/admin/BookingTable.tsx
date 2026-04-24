@@ -44,7 +44,7 @@ const vehicleTypeOptions: Array<{ value: string; label: string }> = [
 ];
 
 const STATUS_PILLS: Array<{
-  value: Exclude<BookingStatusValue, 'IN_PROGRESS'>;
+  value: BookingStatusValue;
   label: string;
   activeClassName: string;
   inactiveClassName: string;
@@ -68,6 +68,12 @@ const STATUS_PILLS: Array<{
     inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
   },
   {
+    value: 'ACTIVE',
+    label: 'Active',
+    activeClassName: 'bg-cyan-600 text-white border-cyan-600',
+    inactiveClassName: 'border border-cyan-500 text-cyan-400',
+  },
+  {
     value: 'COMPLETED',
     label: 'Complete',
     activeClassName: 'bg-green-500 text-white dark:bg-green-600',
@@ -87,7 +93,7 @@ const statusPillBaseClassName =
 export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [pickupDateSort, setPickupDateSort] = useState<'newest' | 'oldest'>('newest');
+  const [pickupDateSort, setPickupDateSort] = useState<'newest' | 'oldest'>('oldest');
   const [showArchived, setShowArchived] = useState(false);
 
   const filteredBookings = useMemo(() => {
@@ -137,24 +143,24 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
               <option value="NEW">New</option>
               <option value="CONFIRMED">Confirmed</option>
               <option value="ASSIGNED">Assigned</option>
-              <option value="IN_PROGRESS">Active</option>
+              <option value="ACTIVE">Active</option>
               <option value="COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
 
-            <select
-              value={pickupDateSort}
-              onChange={(e) => setPickupDateSort(e.target.value as 'newest' | 'oldest')}
-              className={cn(adminInputClassName, 'md:w-[240px]')}
-            >
-              <option value="newest">Latest Pickup First</option>
-              <option value="oldest">Earliest Pickup First</option>
-            </select>
-
+              <select
+                value={pickupDateSort}
+                onChange={(e) => setPickupDateSort(e.target.value as 'newest' | 'oldest')}
+                className={cn(adminInputClassName, 'md:w-[240px]')}
+              >
+                <option value="oldest">Earliest First</option>
+                <option value="newest">Latest First</option>
+              </select>
+            
             <div className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-950 p-1">
               <button
                 type="button"
-                onClick={() => setShowArchived(false)}
+                                onClick={() => setShowArchived(false)}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
                   !showArchived
@@ -166,7 +172,7 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
               </button>
               <button
                 type="button"
-                onClick={() => setShowArchived(true)}
+                                onClick={() => setShowArchived(true)}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
                   showArchived
@@ -383,7 +389,6 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
   }
 
   const parsedFare = fareValue.trim() === '' ? null : Number(fareValue);
-  const activePillStatus = selectedStatus === 'IN_PROGRESS' ? 'ASSIGNED' : selectedStatus;
 
   if (isHidden) {
     return null;
@@ -405,7 +410,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 
           <div className="flex flex-wrap items-center justify-center gap-2 xl:self-start">
             {STATUS_PILLS.map((statusPill) => {
-              const isActive = activePillStatus === statusPill.value;
+              const isActive = selectedStatus === statusPill.value;
 
               return (
                 <button

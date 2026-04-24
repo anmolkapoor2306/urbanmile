@@ -4,7 +4,8 @@ import { useState } from 'react'
 import StatusButtons from './StatusButtons'
 import FareToggle from './FareToggle'
 import { EditableVehiculeTypeSelect } from './EditableVehiculeTypeSelect'
-import { getBookingDisplayAssignee, formatDate, formatTime } from '@/lib/opsDashboard'
+import { getBookingDisplayAssignee } from '@/lib/opsDashboard'
+import { formatDate, formatTime } from '@/lib/utils'
 
 export default function BookingsList({ initialBookings }: { initialBookings: any[] }) {
   const [bookings, setBookings] = useState(initialBookings)
@@ -100,20 +101,13 @@ export default function BookingsList({ initialBookings }: { initialBookings: any
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                  <FareToggle
-                    bookingId={booking.id}
-                    isConfirmed={booking.status === 'CONFIRMED' || booking.status === 'ASSIGNED'}
-                    isAssigned={booking.status === 'ASSIGNED'}
-                    isComplete={booking.status === 'COMPLETED'}
-                  />
-                </div>
 
-                {booking.specialInstructions && (
-                  <div className="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-400">
-                    <span className="font-medium text-zinc-700 dark:text-zinc-300">Note:</span> {booking.specialInstructions}
-                  </div>
-                )}
+				
+				{booking.specialInstructions && (
+					<div className="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-400">
+						<span className="font-medium text-zinc-700 dark:text-zinc-300">Note:</span> {booking.specialInstructions}
+					</div>
+				)}
               </div>
             </article>
           )

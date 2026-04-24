@@ -54,7 +54,7 @@ export function MainDashboard({ bookings }: { bookings: SerializedBooking[] }) {
         />
 
         <QueuePanel
-          title="Confirmed Waiting for Dispatch"
+          title="Dispatch"
           subtitle="Confirmed bookings ready to be assigned to a driver."
           bookings={metrics.confirmedWaitingForAssignment.slice(0, 6)}
           emptyMessage="No confirmed bookings waiting for dispatch."

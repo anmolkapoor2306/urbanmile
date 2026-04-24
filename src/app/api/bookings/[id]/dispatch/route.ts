@@ -176,7 +176,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (result.data.status) {
       data.status = result.data.status;
-    } else if (assignmentType && booking.status !== 'IN_PROGRESS' && booking.status !== 'COMPLETED') {
+    } else if (assignmentType && booking.status !== 'ACTIVE' && booking.status !== 'COMPLETED') {
       data.status = 'ASSIGNED';
     }
 
@@ -188,7 +188,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       return NextResponse.json({ error: 'Assign a driver or vendor before marking as assigned' }, { status: 400 });
     }
 
-    if (data.status === 'IN_PROGRESS') {
+    if (data.status === 'ACTIVE') {
       data.startedAt = new Date();
     }
 

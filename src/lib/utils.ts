@@ -15,6 +15,10 @@ export function formatDate(date: Date): string {
   }).format(date);
 }
 
+export function formatTime(value: Date | string): string {
+  return new Date(value).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
 export function getStatusColor(status: string): string {
   switch (status) {
     case 'NEW':
@@ -23,7 +27,7 @@ export function getStatusColor(status: string): string {
       return 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200';
     case 'ASSIGNED':
       return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-    case 'IN_PROGRESS':
+    case 'ACTIVE':
       return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
     case 'COMPLETED':
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
@@ -48,3 +52,12 @@ export function getCarTypeDisplay(type: string): string {
       return type;
   }
 }
+
+export function toTitleCase(value: string) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+  

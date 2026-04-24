@@ -8,13 +8,13 @@
         "baseURL": "https://llm.atomcloud.space/v1"
       },
       "models": {
-        "devstral-small-2:24b-128k": {
-          "name": "devstral-small-2:24b-128k"
+        "devstral-small-2:24b-96k": {
+          "name": "devstral-small-2:24b-96k"
         }
       }
     }
   },
-  "model": "ollama/devstral-small-2:24b-128k",
+  "model": "ollama/devstral-small-2:24b-96k",
   "permission": {
     "edit": "allow",
     "bash": "allow",

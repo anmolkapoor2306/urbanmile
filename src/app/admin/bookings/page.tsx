@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import type { BookingStatus } from '@/types';
 import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
 import prisma from '@/lib/prisma';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
@@ -21,6 +22,8 @@ export default async function AdminBookingsPage() {
   const serializedBookings = bookings.map(serializeBooking);
   const activeBookings = serializedBookings.filter((booking) => booking.archivedAt === null);
 
+  const activeCount = activeBookings.filter((booking) => booking.status === 'ACTIVE').length;
+
   return (
     <AdminPageFrame currentPage="bookings">
       <div className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden">
@@ -30,7 +33,7 @@ export default async function AdminBookingsPage() {
               ['New/Unassigned', activeBookings.filter((booking) => booking.status === 'NEW').length],
               ['Confirmed', activeBookings.filter((booking) => booking.status === 'CONFIRMED').length],
               ['Assigned', activeBookings.filter((booking) => booking.status === 'ASSIGNED').length],
-              ['Active', activeBookings.filter((booking) => booking.status === 'IN_PROGRESS').length],
+              ['Active', activeCount],
               ['Completed', activeBookings.filter((booking) => booking.status === 'COMPLETED').length],
             ].map(([label, value]) => (
               <AdminStatCard key={label} label={label} value={value} className="text-center" />
