@@ -179,30 +179,46 @@ function AssignmentPanelColumn({
       <div className="dashboard-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
 
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-          <h3 className="text-sm font-semibold text-zinc-300 mb-3">Selected Trip</h3>
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0">
-              <div className="h-8 w-8 rounded-full bg-zinc-700" />
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+              <div className="h-[136px]">
+                {selectedBookingToShow && (
+                  <h3 className="text-sm font-semibold text-zinc-300 mb-3">Selected Trip</h3>
+                )}
+                {!selectedBookingToShow ? (
+                  <div className="flex flex-col items-center justify-center text-center h-full">
+                    <div className="mb-3">
+                      <div className="mx-auto h-12 w-12 rounded-full border-2 border-zinc-700 flex items-center justify-center text-zinc-500">
+                        📅
+                      </div>
+                    </div>
+                    <h4 className="text-base font-semibold text-zinc-100 mb-1">No trip selected</h4>
+                    <p className="text-xs text-zinc-400">Select a trip from the dispatch queue to view details here.</p>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3 h-full">
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-zinc-700 self-center" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-base font-semibold text-zinc-100 mb-2">
+                        {selectedBookingToShow?.pickupLocation || 'No trip selected'} → {selectedBookingToShow?.dropoffLocation || 'No trip selected'}
+                      </div>
+                      <div className="text-xs text-zinc-400 mb-2">
+                        {selectedBookingToShow?.pickupDateTime ? `${formatDate(selectedBookingToShow.pickupDateTime)}, ${formatTime(selectedBookingToShow.pickupDateTime)}` : 'Date & time'}
+                      </div>
+                      <div className="text-xs text-zinc-400 mb-2">
+                        {selectedBookingToShow?.fullName || 'Customer name'} · {selectedBookingToShow?.phone || 'Phone'}
+                      </div>
+                    </div>
+                    <div className="text-right self-center">
+                      <div className="text-sm text-zinc-100">
+                        {selectedBookingToShow?.fareAmount ? formatMoney(selectedBookingToShow.fareAmount) : '--'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-base font-semibold text-zinc-100 mb-2">
-                {selectedBookingToShow?.pickupLocation || 'No trip selected'} → {selectedBookingToShow?.dropoffLocation || 'No trip selected'}
-              </div>
-              <div className="text-xs text-zinc-400 mb-2">
-                {selectedBookingToShow?.pickupDateTime ? `${formatDate(selectedBookingToShow.pickupDateTime)}, ${formatTime(selectedBookingToShow.pickupDateTime)}` : 'Date & time'}
-              </div>
-              <div className="text-xs text-zinc-400 mb-2">
-                {selectedBookingToShow?.fullName || 'Customer name'} · {selectedBookingToShow?.phone || 'Phone'}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-sm text-zinc-100">
-                {selectedBookingToShow?.fareAmount ? formatMoney(selectedBookingToShow.fareAmount) : '--'}
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Selected Driver Card */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
