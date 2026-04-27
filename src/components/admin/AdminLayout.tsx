@@ -27,8 +27,8 @@ export function AdminPageFrame({
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <DashboardHeader currentPage={currentPage} />
 
-      <main className="flex flex-1 w-full min-h-0 min-w-0 overflow-hidden">
-        <div className="flex flex-1 w-full h-full min-h-0 min-w-0 flex-col px-6 py-6 lg:px-8 overflow-hidden">
+      <main className="flex flex-1 w-full overflow-y-auto">
+        <div className="flex flex-1 w-full min-h-0 min-w-0 flex-col px-6 py-6 lg:px-8">
           {children}
         </div>
       </main>

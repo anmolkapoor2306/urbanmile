@@ -8,12 +8,12 @@ import { CONTACT_PHONE_HREF, WHATSAPP_HREF } from '@/lib/contact';
 export default function Home() {
   const [isBookingSuccess, setIsBookingSuccess] = useState(false);
 
-  const handleHeroBookNowClick = () => {
-    document.getElementById('ride')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+const handleHeroBookNowClick = () => {
+  document.getElementById('ride')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
   return (
-    <div className="min-h-full overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+    <div className="overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
       <Navbar />
 
       {!isBookingSuccess && (
@@ -43,24 +43,8 @@ export default function Home() {
         </section>
       )}
 
-      <section id="ride" className="scroll-mt-24 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 -mt-6 sm:-mt-8 mb-12">
+      <section id="ride" className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
         <div className="bg-white dark:bg-zinc-800 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-700 p-5 sm:p-8 md:p-14 pb-6">
-          <div className="mb-5 flex flex-col items-stretch justify-center gap-3 sm:mb-6 sm:flex-row">
-            <a
-              href={WHATSAPP_HREF}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-500 hover:text-white dark:text-emerald-400"
-            >
-              Chat on WhatsApp
-            </a>
-            <a
-              href={CONTACT_PHONE_HREF}
-              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-amber-500 px-4 py-3 text-sm font-semibold text-amber-600 transition-colors hover:bg-amber-500 hover:text-zinc-900 dark:text-amber-400"
-            >
-              Call Now
-            </a>
-          </div>
           <Suspense fallback={<div className="min-h-[320px] animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-700" />}>
             <BookingForm 
               onBookingSuccess={() => setIsBookingSuccess(true)}

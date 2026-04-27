@@ -234,15 +234,15 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className={cn('space-y-8', isSuccess && 'flex min-h-[520px] items-center py-6 sm:min-h-[560px] sm:py-10')}
-    >
+              <form
+                onSubmit={handleSubmit}
+                className="space-y-8"
+              >
       {isSuccess ? (
-        <div
-          ref={confirmationRef}
-          className="mx-auto flex w-full max-w-2xl flex-col items-center rounded-2xl border border-amber-200 bg-amber-50/80 px-6 py-10 text-center shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20 sm:px-10 sm:py-12"
-        >
+      <div
+        ref={confirmationRef}
+        className="mx-auto flex w-full max-w-2xl flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/80 px-6 py-10 text-center shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20 sm:px-10 sm:py-12"
+      >
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
             <svg className="h-8 w-8 text-amber-600 dark:text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

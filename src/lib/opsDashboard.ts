@@ -55,7 +55,7 @@ export function buildBookingMetrics(bookings: SerializedBooking[]) {
 
   const todaysBookings = bookings.filter((booking) => isSameDay(new Date(booking.createdAt), now));
   const unpaidBookings = bookings.filter((booking) => booking.paymentStatus !== 'PAID');
-  const activeTrips = bookings.filter((booking) => booking.status === 'ASSIGNED' || booking.status === 'ACTIVE');
+  const activeTrips = bookings.filter((booking) => booking.status === 'ACTIVE');
 
   return {
     total: bookings.length,
