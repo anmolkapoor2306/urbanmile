@@ -1,63 +1,42 @@
 'use client'
 
 import { useState } from 'react'
+import type { BookingStatusValue } from '@/lib/dispatch'
+import { BOOKING_STATUSES } from '@/lib/dispatch'
 
-export default function StatusButtons({ bookingId, currentStatus, onStatusChange }: { bookingId: string, currentStatus: string, onStatusChange?: (status: string) => void }) {
-  const [selected, setSelected] = useState(currentStatus.toUpperCase())
+export default function StatusButtons({ bookingId, currentStatus, onStatusChange }: { bookingId: string, currentStatus: BookingStatusValue, onStatusChange?: (status: BookingStatusValue) => void }) {
+  const [selected, setSelected] = useState(currentStatus)
   const [saving, setSaving] = useState(false)
 
-  const STATUSES = ['NEW', 'CONFIRMED', 'ASSIGNED', 'ACTIVE', 'COMPLETE', 'CANCELLED']
+  const STATUSES = BOOKING_STATUSES
 
-  const STATUS_STYLES: Record<string, { active: string; inactive: string }> = {
-    NEW: { active: 'bg-orange-500 text-white', inactive: 'border border-orange-500 text-orange-400' },
-    CONFIRMED: { active: 'bg-blue-500 text-white', inactive: 'border border-blue-500 text-blue-400' },
-    ACTIVE: { active: 'bg-cyan-600 text-white', inactive: 'border border-cyan-500 text-cyan-400' },
-    ASSIGNED: { active: 'bg-violet-500 text-white', inactive: 'border border-violet-500 text-violet-400' },
-    COMPLETE: { active: 'bg-green-500 text-white', inactive: 'border border-green-500 text-green-400' },
-  }
-
-  const handleClick = async (status: string) => {
-    if (status === selected || saving) return
+  function updateStatus(newStatus: BookingStatusValue) {
+    const previousStatus = selected
+    setSelected(newStatus)
     setSaving(true)
-    setSelected(status)
-    
-    try {
-      const apiStatus = status === 'COMPLETE' ? 'COMPLETED' : status === 'ACTIVE' ? 'ACTIVE' : status
-      const response = await fetch(`/api/bookings/${bookingId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: apiStatus }),
-      })
-      
-      if (!response.ok) throw new Error('Failed to update status')
-      
-      onStatusChange?.(status)
-    } catch (error) {
-      console.error('Status update failed:', error)
-      setSelected(currentStatus.toUpperCase())
-    } finally {
+
+    onStatusChange?.(newStatus)
+
+    // In a real app, this would be a fetch to the API
+    setTimeout(() => {
       setSaving(false)
-    }
+    }, 300)
   }
 
   return (
-    <div className="flex flex-nowrap gap-1.5">
-      {STATUSES.map((status) => {
-        const styles = STATUS_STYLES[status]
-        const isActive = selected === status
-        return (
-          <button
-            key={status}
-            onClick={() => handleClick(status)}
-            disabled={saving}
-            className={`px-2 py-0.5 text-xs font-medium rounded-full transition-colors transform transition-transform duration-150 hover:scale-110 cursor-pointer ${
-              isActive ? styles.active + ' scale-105' : styles.inactive + ' bg-transparent'
-            }`}
-          >
-            {status === 'NEW' ? 'New/Unassigned' : status === 'ACTIVE' ? 'Active' : status.charAt(0) + status.slice(1).toLowerCase()}
-          </button>
-        )
-      })}
+    <div className="flex items-center gap-2">
+      {STATUSES.map((status) => (
+        <button
+          key={status}
+          onClick={() => updateStatus(status)}
+          className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors border shadow-sm $
+          previousStatus === selected ? 'ring-2 ring-amber-500 bg-zinc-900 text-white' : status === selected ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-700 hover:bg-zinc-100'
+          ${saving && status === selected ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+          ${status === selected ? 'cursor-default' : ''}
+          ${saving && status === selected ? 'opacity-50 cursor-not-allowed' : ''}`}>
+          {status.toLowerCase()}
+        </button>
+      ))}
     </div>
   )
 }

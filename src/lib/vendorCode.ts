@@ -11,10 +11,10 @@ export async function generateVendorCode(
 ): Promise<string> {
   const prefix = 'VDR';
 
-  const existingCodes = await db.vendor.findMany({
-    where: { id: { not: null } },
-    select: { id: true },
-  });
+   const existingCodes = await db.vendor.findMany({
+     where: { id: { not: undefined } },
+     select: { id: true },
+   });
 
   const codePattern = new RegExp(`^${prefix}-(\d+)$`);
   const nextSequence =

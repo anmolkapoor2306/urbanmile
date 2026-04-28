@@ -24,7 +24,7 @@ const handleHeroBookNowClick = () => {
               Available 24/7 Across India
             </div>
             <h1 className="mx-auto mb-4 max-w-[12ch] break-words text-[2.15rem] font-bold tracking-tight text-white sm:max-w-none sm:text-5xl md:text-6xl">
-              UrbanMile - Your Reliable Ride
+               UrbanMiles - Your Reliable Ride
             </h1>
             <p className="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
               Professional, reliable, and comfortable rides across India. 
@@ -106,7 +106,7 @@ const handleHeroBookNowClick = () => {
       <section id="business" className="bg-zinc-100 dark:bg-zinc-800 py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-center text-zinc-900 dark:text-zinc-100 mb-8">
-            About UrbanMile
+            About UrbanMiles
           </h2>
           <div className="max-w-3xl mx-auto text-center">
             <p className="text-zinc-600 dark:text-zinc-400 text-lg leading-relaxed mb-6">
@@ -157,7 +157,7 @@ const handleHeroBookNowClick = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="border-t border-zinc-800 pt-8 flex items-center justify-center">
             <p className="text-sm">
-              &copy; 2026 UrbanMile. All rights reserved.
+               &copy; 2026 UrbanMiles. All rights reserved.
             </p>
           </div>
         </div>

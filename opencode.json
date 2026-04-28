@@ -5,7 +5,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama Local",
       "options": {
-        "baseURL": "http://localhost:11434//v1"
+        "baseURL": "http://llm.atomcloud.space/v1"
       },
       "models": {
         "devstral-small-2:24b-96k": {
@@ -22,6 +22,6 @@
     "webfetch": "ask"
   },
   "instructions": [
-    "README.md"
+    "AGENTS.md"
   ]
 }

@@ -6,6 +6,7 @@ import { adminInputClassName, adminInsetClassName, adminSecondaryButtonClassName
 import type { BookingStatusValue } from '@/lib/dispatch';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn } from '@/lib/utils';
+import type { CarType } from '@/types';
 
 export interface AdminBooking {
   id: string;
@@ -16,9 +17,9 @@ export interface AdminBooking {
   pickupLocation: string;
   dropoffLocation: string;
   pickupDateTime: string;
-  carType: string;
+  carType: CarType;
   specialInstructions: string | null;
-  status: string;
+  status: BookingStatusValue;
   fareAmount?: number | null;
   paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
   assignmentType?: 'OWN_DRIVER' | 'OUTSOURCED_DRIVER' | 'MANUAL_OUTSOURCED' | null;
@@ -210,13 +211,13 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 
 function BookingCard({ booking }: { booking: AdminBooking }) {
   const router = useRouter();
-  const [selectedStatus, setSelectedStatus] = useState(booking.status);
-  const [selectedCarType, setSelectedCarType] = useState(booking.carType);
+  const [selectedStatus, setSelectedStatus] = useState<BookingStatusValue>(booking.status);
+  const [selectedCarType, setSelectedCarType] = useState<CarType>(booking.carType);
   const [fareValue, setFareValue] = useState(booking.fareAmount?.toString() ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [archiveState, setArchiveState] = useState<{
-    previousStatus: string;
+    previousStatus: BookingStatusValue;
     nextStatus: 'COMPLETED' | 'CANCELLED';
   } | null>(null);
   const [isFadingOut, setIsFadingOut] = useState(false);
@@ -271,7 +272,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
     }
   }
 
-  async function updateStatus(nextStatus: string) {
+  async function updateStatus(nextStatus: BookingStatusValue) {
     if (nextStatus === 'CANCELLED' && !confirm('Cancel this booking and move it to archive?')) {
       return;
     }
@@ -366,7 +367,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
     }
   }
 
-  async function updateCarType(nextCarType: string) {
+  async function updateCarType(nextCarType: CarType) {
     const previousCarType = selectedCarType;
     setSelectedCarType(nextCarType);
 
@@ -444,7 +445,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
             <span className="text-xs uppercase tracking-wide text-zinc-500">Vehicle Type</span>
             <select
               value={selectedCarType}
-              onChange={(event) => void updateCarType(event.target.value)}
+               onChange={(event) => void updateCarType(event.target.value as CarType)}
               disabled={isSaving}
               className="mt-1 w-full max-w-[190px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
             >

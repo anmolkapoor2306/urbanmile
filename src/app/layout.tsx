@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "UrbanMile - Your Reliable Taxi Service Across India",
+  title: "UrbanMiles - Your Reliable Taxi Service Across India",
   description: "Book professional, reliable taxi rides with UrbanMile. Available 24/7 with transparent pricing and comfortable vehicles.",
 };
 

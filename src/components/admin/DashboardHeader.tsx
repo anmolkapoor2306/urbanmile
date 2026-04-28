@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
-export type DashboardPage = 'dashboard' | 'bookings' | 'dispatch' | 'drivers';
+export type DashboardPage = 'dashboard' | 'bookings' | 'dispatch' | 'drivers' | 'finance';
 
 interface DashboardHeaderProps {
   currentPage: DashboardPage;
@@ -15,6 +15,7 @@ const navItems: Array<{ key: DashboardPage; label: string; href: string }> = [
   { key: 'bookings', label: 'Bookings', href: '/admin/bookings' },
   { key: 'dispatch', label: 'Dispatch', href: '/admin/dispatch' },
   { key: 'drivers', label: 'Drivers', href: '/admin/drivers' },
+  { key: 'finance', label: 'Finance', href: '/admin/finance' },
 ];
 
 export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
@@ -31,7 +32,7 @@ export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <Link href="/admin" className="flex w-fit items-center gap-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-zinc-950">
             <div className="h-8 w-8 rounded-lg bg-amber-500" aria-hidden="true"></div>
-            <span className="text-xl font-bold text-zinc-100">UrbanMile</span>
+            <span className="text-xl font-bold text-zinc-100">UrbanMiles</span>
           </Link>
 
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-end lg:gap-6">

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 export const vendorRecordSelect = {
   id: true,
   name: true,
-  displayName: true,
+  /* displayName: true, */
   phone: true,
   email: true,
   isActive: true,
@@ -12,6 +12,7 @@ export const vendorRecordSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.VendorSelect;
+
 
 export type VendorRecord = Prisma.VendorGetPayload<{
   select: typeof vendorRecordSelect;
@@ -23,7 +24,7 @@ export function serializeVendor(vendor: VendorRecord) {
   return {
     id: vendor.id,
     name: vendor.name,
-    displayName: vendor.displayName,
+    /* displayName: vendor.displayName, */
     phone: vendor.phone,
     email: vendor.email,
     isActive: vendor.isActive,

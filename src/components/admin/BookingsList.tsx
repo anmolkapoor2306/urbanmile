@@ -2,18 +2,19 @@
 
 import { useState } from 'react'
 import StatusButtons from './StatusButtons'
-import FareToggle from './FareToggle'
 import { EditableVehiculeTypeSelect } from './EditableVehiculeTypeSelect'
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard'
 import { formatDate, formatTime } from '@/lib/utils'
+import type { SerializedBooking } from '@/lib/bookingRecord'
+import type { BookingStatusValue } from '@/lib/dispatch'
 
-export default function BookingsList({ initialBookings }: { initialBookings: any[] }) {
+export default function BookingsList({ initialBookings }: { initialBookings: SerializedBooking[] }) {
   const [bookings, setBookings] = useState(initialBookings)
   const [fadingIds, setFadingIds] = useState(new Set<string>())
   const [hiddenIds, setHiddenIds] = useState(new Set<string>())
 
-  const handleStatusChange = (bookingId: string, status: string) => {
-    if (status === 'COMPLETE' || status === 'CANCELLED') {
+  const handleStatusChange = (bookingId: string, status: BookingStatusValue) => {
+    if (status === 'COMPLETED' || status === 'CANCELLED') {
       setFadingIds(prev => new Set(prev).add(bookingId))
       setTimeout(() => {
         setHiddenIds(prev => new Set(prev).add(bookingId))
