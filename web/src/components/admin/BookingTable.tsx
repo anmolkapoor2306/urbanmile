@@ -72,7 +72,7 @@ const STATUS_PILLS: Array<{
     value: 'ACTIVE',
     label: 'Active',
     activeClassName: 'bg-cyan-600 text-white border-cyan-600',
-    inactiveClassName: 'border border-cyan-500 text-cyan-400',
+    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
   },
   {
     value: 'COMPLETED',

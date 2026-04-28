@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, ScrollView, Pressable } from 'react-native';
+import { StyleSheet, Text, View, TextInput, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
 
 export default function BookRide() {
   const router = useRouter();
@@ -15,9 +15,65 @@ export default function BookRide() {
     vehicleType: 'Economy',
     specialInstructions: '',
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = () => {
-    router.push('/confirmation');
+  const getLocalIP = () => {
+    return '192.168.1.42';
+  };
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    
+    setIsSubmitting(true);
+    setError('');
+    
+    try {
+      const localIP = await getLocalIP();
+      const apiUrl = `http://${localIP}:3000/api/bookings/public`;
+      
+      const bookingData = {
+        bookingType: 'PERSONAL',
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        pickupLocation: form.pickupLocation,
+        dropoffLocation: form.dropLocation,
+        pickupDateTime: `${form.pickupDate}T${form.pickupTime}`,
+        carType: form.vehicleType.toUpperCase().replace('(', '').replace(')', '').replace('/', '_'),
+        specialInstructions: form.specialInstructions,
+      };
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(bookingData),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create booking');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        router.push({
+          pathname: '/confirmation',
+          params: { reference: result.data.bookingReference },
+        });
+      } else {
+        throw new Error('Booking created but no reference returned');
+      }
+    } catch (err) {
+      console.error('Booking error:', err);
+      setError(err.message || 'Failed to create booking. Please try again.');
+      Alert.alert('Booking Failed', err.message || 'Failed to create booking. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -54,9 +110,14 @@ export default function BookRide() {
         <Text style={styles.label}>Special Instructions</Text>
         <TextInput style={[styles.input, styles.textArea]} value={form.specialInstructions} onChangeText={(text) => setForm({ ...form, specialInstructions: text })} placeholder="Accessibility needs, luggage, etc." placeholderTextColor="#aaaaaa" multiline />
 
-        <Pressable onPress={handleSubmit} style={styles.button}>
-          <Text style={styles.buttonText}>Book Now</Text>
+        <Pressable onPress={handleSubmit} style={styles.button} disabled={isSubmitting}>
+          {isSubmitting ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.buttonText}>Book Now</Text>
+          )}
         </Pressable>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
     </ScrollView>
   );
@@ -108,9 +169,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
   },
-  buttonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
+  error: {
+      color: 'red',
+      fontSize: 14,
+      marginTop: 10,
+      textAlign: 'center',
+    },
 });

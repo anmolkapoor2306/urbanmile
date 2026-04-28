@@ -16,29 +16,14 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'dark',
+  theme: 'light',
   toggleTheme: () => {},
 });
 
 const STORAGE_KEY = 'urbanmiles-theme';
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') {
-      return 'dark';
-    }
-
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-      if (stored === 'light' || stored === 'dark') {
-        return stored;
-      }
-    } catch {
-      // localStorage unavailable — default stays 'dark'
-    }
-
-    return 'dark';
-  });
+  const [theme, setTheme] = useState<Theme>('light');
 
   // Apply 'dark' class to <html> when theme is set
   useEffect(() => {

@@ -12,42 +12,42 @@ export function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex min-h-16 items-center justify-between gap-4 py-3">
+    <nav className="sticky top-0 z-50 border-b border-zinc-200/80 bg-white/95 text-zinc-950 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 dark:text-white">
+      <div className="mx-auto w-full max-w-[1536px] px-4 md:px-5 lg:px-8">
+        <div className="flex min-h-[72px] items-center justify-between gap-3 py-4">
           <div className="shrink-0">
             <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded bg-amber-500">
-                <svg className="h-5 w-5 text-zinc-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-zinc-950 text-amber-400 dark:bg-white dark:text-zinc-950">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17h8m-9-4h10l-1.3-4.2A2.5 2.5 0 0013.3 7h-2.6a2.5 2.5 0 00-2.4 1.8L7 13zm1 0v3m8-3v3M6 16h1m10 0h1" />
                 </svg>
               </div>
-               <span className="text-lg font-bold tracking-tight">UrbanMiles</span>
+              <span className="text-base font-bold tracking-tight sm:text-lg">UrbanMiles</span>
             </Link>
           </div>
 
-          <div className="hidden flex-1 items-center justify-center gap-8 md:flex">
+          <div className="hidden flex-1 items-center justify-center gap-12 md:flex">
             <button
               type="button"
               onClick={() => scrollToSection('ride')}
-              className="text-sm font-medium text-zinc-600 transition-colors hover:text-amber-600 dark:text-zinc-300 dark:hover:text-amber-500"
+              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
             >
               Ride
             </button>
             <button
               type="button"
               onClick={() => scrollToSection('about')}
-              className="text-sm font-medium text-zinc-600 transition-colors hover:text-amber-600 dark:text-zinc-300 dark:hover:text-amber-500"
+              className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
             >
               About
             </button>
           </div>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <button
               type="button"
               onClick={toggleTheme}
-              className="inline-flex items-center justify-center rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white sm:h-11 sm:w-11"
               aria-label="Toggle theme"
             >
               {theme === 'dark' ? (
@@ -62,7 +62,7 @@ export function Navbar() {
             </button>
             <a
               href={CONTACT_PHONE_HREF}
-              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-amber-500 px-4 py-2 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-500 hover:text-zinc-900 dark:text-amber-400"
+              className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-full bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 sm:min-h-11 sm:px-5"
             >
               Call Now
             </a>

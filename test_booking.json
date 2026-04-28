@@ -1,0 +1,10 @@
+{
+  "bookingType": "PERSONAL",
+  "fullName": "John Doe",
+  "email": "john@example.com",
+  "phone": "1234567890",
+  "pickupLocation": "123 Main St",
+  "dropoffLocation": "456 Oak Ave",
+  "pickupDateTime": "2026-05-01T14:30:00",
+  "carType": "SEDAN"
+}
