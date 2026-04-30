@@ -4,6 +4,7 @@ import { useState, FormEvent, useEffect, useRef } from 'react';
 import { CalendarClock, ChevronDown, X } from 'lucide-react';
 import { z } from 'zod';
 import { cn } from '@/lib/utils';
+import { CONTACT_PHONE_HREF } from '@/lib/contact';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 import { useBookingLocationField } from '@/hooks/useBookingLocationField';
 import {
@@ -11,6 +12,8 @@ import {
   getFixedRoutePrice,
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
+
+const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -40,6 +43,7 @@ type BookingMode = 'ONE_WAY' | 'ROUND_TRIP';
 type PickupTiming = 'NOW' | 'LATER';
 type RideOption = 'SEDAN' | 'SUV';
 type LocationFieldName = 'pickupLocation' | 'dropoffLocation';
+type BookingErrorField = keyof BookingFormData | 'returnDateTime';
 type BookingResponseItem = {
   id?: string;
   bookingReference?: string;
@@ -60,6 +64,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   const [isPickupTimingOpen, setIsPickupTimingOpen] = useState(false);
   const [pickupDate, setPickupDate] = useState('');
   const [pickupTime, setPickupTime] = useState('');
+  const [returnDate, setReturnDate] = useState('');
+  const [returnTime, setReturnTime] = useState('');
   const [priceQuote, setPriceQuote] = useState<FixedRoutePrice | null>(null);
   const [selectedRide, setSelectedRide] = useState<RideOption>('SEDAN');
   const [routeMessage, setRouteMessage] = useState<string | null>(null);
@@ -88,7 +94,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     dropoffPlaceId: '',
     dropoffLocationSource: 'manual',
   });
-  const [errors, setErrors] = useState<Partial<Record<keyof BookingFormData, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<BookingErrorField, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
@@ -96,6 +102,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
   const finalPrice = priceQuote ? priceQuote.sedanPrice + (selectedRide === 'SUV' ? 1000 : 0) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
+  const returnDateTime = buildPickupDateTime(returnDate, returnTime);
+  const isRouteUnavailable = routeMessage === UNAVAILABLE_ROUTE_MESSAGE;
   const activeLocationValue =
     activeLocationField === 'pickupLocation'
       ? pickupField.address
@@ -143,13 +151,22 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     } else if (name === 'pickupTime') {
       setPickupTime(value);
       setFormData((prev) => ({ ...prev, pickupDateTime: buildPickupDateTime(pickupDate, value) }));
+    } else if (name === 'returnDate') {
+      setReturnDate(value);
+    } else if (name === 'returnTime') {
+      setReturnTime(value);
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
 
-    const errorName = name === 'pickupDate' || name === 'pickupTime' ? 'pickupDateTime' : name;
+    const errorName =
+      name === 'pickupDate' || name === 'pickupTime'
+        ? 'pickupDateTime'
+        : name === 'returnDate' || name === 'returnTime'
+          ? 'returnDateTime'
+          : name;
 
-    if (errors[errorName as keyof BookingFormData]) {
+    if (errors[errorName as BookingErrorField]) {
       setErrors((prev) => ({ ...prev, [errorName]: undefined }));
     }
 
@@ -331,7 +348,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     const pickupDateTime =
       pickupTiming === 'NOW' ? new Date().toISOString() : formData.pickupDateTime;
 
-    const routeErrors: Partial<Record<keyof BookingFormData, string>> = {};
+    const routeErrors: Partial<Record<BookingErrorField, string>> = {};
     if (!formData.pickupLocation.trim()) {
       routeErrors.pickupLocation = 'Please enter pickup location';
     }
@@ -340,6 +357,13 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     }
     if (pickupTiming === 'LATER' && !pickupDateTime) {
       routeErrors.pickupDateTime = 'Please select pickup date and time';
+    }
+
+    const returnDateTimeError =
+      bookingMode === 'ROUND_TRIP' ? validateReturnDateTime(pickupDateTime, returnDateTime) : null;
+
+    if (returnDateTimeError) {
+      routeErrors.returnDateTime = returnDateTimeError;
     }
 
     if (Object.keys(routeErrors).length > 0) {
@@ -351,7 +375,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
     if (!fixedRoutePrice) {
       setPriceQuote(null);
-      setRouteMessage('Price not available for this route yet. Call support or try later.');
+      setRouteMessage(UNAVAILABLE_ROUTE_MESSAGE);
       return;
     }
 
@@ -376,6 +400,21 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
     const pickupDateTime =
       pickupTiming === 'NOW' ? new Date().toISOString() : formData.pickupDateTime;
+    const bookingValidationErrors: Partial<Record<BookingErrorField, string>> = {};
+
+    const returnDateTimeError =
+      bookingMode === 'ROUND_TRIP' ? validateReturnDateTime(pickupDateTime, returnDateTime) : null;
+
+    if (returnDateTimeError) {
+      bookingValidationErrors.returnDateTime = returnDateTimeError;
+    }
+
+    if (Object.keys(bookingValidationErrors).length > 0) {
+      setErrors(bookingValidationErrors);
+      setIsSubmitting(false);
+      return;
+    }
+
     const result = bookingSchema.safeParse({
       ...formData,
       pickupDateTime,
@@ -384,7 +423,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     });
 
     if (!result.success) {
-      const fieldErrors: Partial<Record<keyof BookingFormData, string>> = {};
+      const fieldErrors: Partial<Record<BookingErrorField, string>> = {};
       for (const issue of result.error.issues) {
         const fieldName = issue.path[0] as keyof BookingFormData;
         if (fieldName in formData) {
@@ -420,6 +459,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
           dropoffPlaceId: result.data.dropoffPlaceId,
           dropoffLocationSource: result.data.dropoffLocationSource,
           bookingMode,
+          returnPickupDateTime:
+            bookingMode === 'ROUND_TRIP' ? new Date(returnDateTime).toISOString() : undefined,
         }),
       });
 
@@ -446,6 +487,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       dropoffField.reset();
       setPickupDate('');
       setPickupTime('');
+      setReturnDate('');
+      setReturnTime('');
       setBookingMode('ONE_WAY');
       setPickupTiming('NOW');
       setSelectedRide('SEDAN');
@@ -529,7 +572,11 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                 onClick={() => {
                   const nextMode = tab.value as BookingMode;
                   setBookingMode(nextMode);
-                  setFormData((prev) => ({ ...prev, bookingMode: nextMode }));
+                  setPriceQuote(null);
+                  setErrors((prev) => ({
+                    ...prev,
+                    returnDateTime: nextMode === 'ONE_WAY' ? undefined : prev.returnDateTime,
+                  }));
                 }}
                 className={cn(
                   'min-h-10 min-w-0 rounded-full px-4 text-sm font-semibold transition-colors',
@@ -657,6 +704,30 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                 />
               </div>
             )}
+
+            {bookingMode === 'ROUND_TRIP' && (
+              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                <BookingField
+                  name="returnDate"
+                  type="date"
+                  value={returnDate}
+                  onChange={handleInputChange}
+                  min={pickupTiming === 'LATER' && pickupDate ? pickupDate : new Date().toISOString().split('T')[0]}
+                  placeholder="Return date"
+                  error={errors.returnDateTime}
+                  required
+                />
+                <BookingField
+                  name="returnTime"
+                  type="time"
+                  value={returnTime}
+                  onChange={handleInputChange}
+                  placeholder="Return time"
+                  error={!returnDate ? undefined : errors.returnDateTime}
+                  required
+                />
+              </div>
+            )}
           </div>
 
           <button
@@ -678,19 +749,44 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
             </p>
           )}
 
+          {bookingMode === 'ROUND_TRIP' && returnDateTime && !errors.returnDateTime && (
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Return: {formatPickupDateTime(returnDateTime)}
+            </p>
+          )}
+
           {routeMessage && (
             <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
               {routeMessage}
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex min-h-13 w-full items-center justify-center rounded-full bg-zinc-950 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
-          >
-            {isSubmitting ? 'Checking...' : 'See Prices'}
-          </button>
+          <div className="relative min-h-13 w-full">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={cn(
+                mainActionClassName,
+                'absolute inset-0',
+                isRouteUnavailable && 'pointer-events-none translate-y-1 opacity-0'
+              )}
+              tabIndex={isRouteUnavailable ? -1 : undefined}
+            >
+              {isSubmitting ? 'Checking...' : 'See Prices'}
+            </button>
+            <a
+              href={CONTACT_PHONE_HREF}
+              className={cn(
+                mainActionClassName,
+                'absolute inset-0',
+                isRouteUnavailable ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
+              )}
+              tabIndex={isRouteUnavailable ? undefined : -1}
+              aria-label="Call UrbanMiles now"
+            >
+              Call Now
+            </a>
+          </div>
         </div>
       )}
     </form>
@@ -705,6 +801,9 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                 <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Dropoff:</span> {formData.dropoffLocation}</p>
                 <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Ride type:</span> {bookingMode === 'ROUND_TRIP' ? 'Round Trip' : 'One Way'}</p>
                 <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Pickup mode:</span> {pickupTiming === 'NOW' ? 'Pickup now' : formatPickupDateTime(formData.pickupDateTime)}</p>
+                {bookingMode === 'ROUND_TRIP' && (
+                  <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Return pickup:</span> {formatPickupDateTime(returnDateTime)}</p>
+                )}
               </div>
             </div>
             <button
@@ -838,6 +937,11 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   );
 }
 
+const mainActionClassName = cn(
+  'flex min-h-13 w-full items-center justify-center overflow-hidden rounded-full bg-zinc-950 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-zinc-950/15 transition-all duration-200 ease-out hover:bg-zinc-800',
+  'disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300'
+);
+
 interface BookingFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   icon?: 'pickup' | 'dropoff';
@@ -942,4 +1046,23 @@ function formatPickupDateTime(value: string) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(parsedDate);
+}
+
+function validateReturnDateTime(outgoingDateTime: string, returnDateTime: string) {
+  if (!returnDateTime) {
+    return 'Please select return date and time';
+  }
+
+  const outgoing = new Date(outgoingDateTime);
+  const returning = new Date(returnDateTime);
+
+  if (Number.isNaN(returning.getTime())) {
+    return 'Please select return date and time';
+  }
+
+  if (!Number.isNaN(outgoing.getTime()) && returning <= outgoing) {
+    return 'Return date and time must be after pickup date and time';
+  }
+
+  return null;
 }

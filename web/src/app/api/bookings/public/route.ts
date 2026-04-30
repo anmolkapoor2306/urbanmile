@@ -27,6 +27,7 @@ const bookingSchema = z.object({
   pickupLocation: z.string().min(1, 'Please enter pickup location'),
   dropoffLocation: z.string().min(1, 'Please enter drop location'),
   pickupDateTime: z.string().min(1, 'Please select pickup date and time'),
+  returnPickupDateTime: z.string().optional(),
   bookingMode: z.enum(['ONE_WAY', 'ROUND_TRIP']).optional(),
   carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val !== undefined, {
     message: 'Please select a vehicle type',
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
       pickupLocation,
       dropoffLocation,
       pickupDateTime,
+      returnPickupDateTime,
       bookingMode,
       carType,
       fareAmount,
@@ -78,6 +80,30 @@ export async function POST(request: NextRequest) {
     } = result.data;
     const pickupAt = new Date(pickupDateTime);
     const isRoundTrip = bookingMode === 'ROUND_TRIP';
+
+    if (Number.isNaN(pickupAt.getTime())) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid pickup date and time' },
+        { status: 400 }
+      );
+    }
+
+    const returnPickupAt = isRoundTrip ? new Date(returnPickupDateTime ?? '') : null;
+
+    if (isRoundTrip && (!returnPickupAt || Number.isNaN(returnPickupAt.getTime()))) {
+      return NextResponse.json(
+        { success: false, error: 'Return date and time is required' },
+        { status: 400 }
+      );
+    }
+
+    if (isRoundTrip && returnPickupAt && returnPickupAt <= pickupAt) {
+      return NextResponse.json(
+        { success: false, error: 'Return date and time must be after pickup date and time' },
+        { status: 400 }
+      );
+    }
+
     const baseId = crypto.randomUUID();
     const baseReference = createBookingReference(baseId, pickupAt);
     const legPrice = fareAmount ?? null;
@@ -94,7 +120,6 @@ export async function POST(request: NextRequest) {
       dropoffLongitude: dropoffLongitude ?? null,
       dropoffPlaceId: dropoffPlaceId || null,
       dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-      pickupDateTime: pickupAt,
       carType,
       fareAmount: legPrice,
       specialInstructions: specialInstructions || null,
@@ -106,17 +131,20 @@ export async function POST(request: NextRequest) {
       bookingReference,
       pickup,
       dropoff,
+      pickupDateTime,
     }: {
       id: string;
       bookingReference: string;
       pickup: string;
       dropoff: string;
+      pickupDateTime: Date;
     }) => ({
       ...commonData,
       id,
       bookingReference,
       pickupLocation: pickup,
       dropoffLocation: dropoff,
+      pickupDateTime,
     });
 
     const bookingPlans = isRoundTrip
@@ -126,12 +154,14 @@ export async function POST(request: NextRequest) {
             bookingReference: `${baseReference}-A`,
             pickup: pickupLocation,
             dropoff: dropoffLocation,
+            pickupDateTime: pickupAt,
           },
           {
             id: crypto.randomUUID(),
             bookingReference: `${baseReference}-B`,
             pickup: dropoffLocation,
             dropoff: pickupLocation,
+            pickupDateTime: returnPickupAt as Date,
           },
         ]
       : [
@@ -140,6 +170,7 @@ export async function POST(request: NextRequest) {
             bookingReference: baseReference,
             pickup: pickupLocation,
             dropoff: dropoffLocation,
+            pickupDateTime: pickupAt,
           },
         ];
 

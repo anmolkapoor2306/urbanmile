@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View, Button } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function Confirmation() {
   const { reference } = useLocalSearchParams();
@@ -11,7 +11,7 @@ export default function Confirmation() {
         <Text style={styles.referenceText}>Reference: {reference}</Text>
       </View>
 
-      <Text style={styles.message}>Your ride has been booked successfully. We'll send you a confirmation email.</Text>
+      <Text style={styles.message}>{"Your ride has been booked successfully. We'll send you a confirmation email."}</Text>
     </View>
   );
 }

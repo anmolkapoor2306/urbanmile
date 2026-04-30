@@ -1,5 +1,5 @@
-import { Link, Redirect } from 'expo-router';
-import { StyleSheet, Text, View, Button, Image } from 'react-native';
+import { Link } from 'expo-router';
+import { StyleSheet, Text, View, Button } from 'react-native';
 
 export default function Home() {
   return (

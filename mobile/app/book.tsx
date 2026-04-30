@@ -68,9 +68,11 @@ export default function BookRide() {
         throw new Error('Booking created but no reference returned');
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create booking. Please try again.';
+
       console.error('Booking error:', err);
-      setError(err.message || 'Failed to create booking. Please try again.');
-      Alert.alert('Booking Failed', err.message || 'Failed to create booking. Please try again.');
+      setError(message);
+      Alert.alert('Booking Failed', message);
     } finally {
       setIsSubmitting(false);
     }
@@ -168,6 +170,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginTop: 20,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    marginTop: 10,
+    textAlign: 'center',
   },
   error: {
       color: 'red',
