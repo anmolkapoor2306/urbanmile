@@ -17,6 +17,7 @@ export const createBooking = async (input: CreateBookingInput) => {
         dropoffLocation: input.dropoffLocation,
         pickupDateTime: input.pickupDateTime,
         carType: input.carType,
+        fareAmount: input.fareAmount ?? null,
         specialInstructions: input.specialInstructions ?? null,
         status: 'NEW',
       },

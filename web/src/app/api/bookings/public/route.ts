@@ -1,20 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { bookingRecordSelect, createBookingReference, serializeBooking } from '@/lib/bookingRecord';
+import { createBookingReference } from '@/lib/bookingRecord';
 import { z } from 'zod';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
+
+const publicBookingSelect = {
+  id: true,
+  bookingReference: true,
+  fullName: true,
+  email: true,
+  phone: true,
+  pickupLocation: true,
+  dropoffLocation: true,
+  pickupDateTime: true,
+  carType: true,
+  fareAmount: true,
+  specialInstructions: true,
+  status: true,
+} as const;
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
   fullName: z.string().min(2, 'Please enter a valid name'),
-  email: z.string().email('Please enter a valid email address'),
+  email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
   phone: z.string().min(10, 'Please enter a valid phone number').max(15, 'Phone number too long'),
   pickupLocation: z.string().min(1, 'Please enter pickup location'),
   dropoffLocation: z.string().min(1, 'Please enter drop location'),
   pickupDateTime: z.string().min(1, 'Please select pickup date and time'),
+  bookingMode: z.enum(['ONE_WAY', 'ROUND_TRIP']).optional(),
   carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val !== undefined, {
     message: 'Please select a vehicle type',
   }),
+  fareAmount: z.number().positive().optional(),
   specialInstructions: z.string().optional(),
   pickupLatitude: bookingLocationMetadataSchema.shape.latitude,
   pickupLongitude: bookingLocationMetadataSchema.shape.longitude,
@@ -33,7 +50,7 @@ export async function POST(request: NextRequest) {
 
     if (!result.success) {
       return NextResponse.json(
-        { error: result.error.issues.map(i => i.message).join(', ') },
+        { success: false, error: result.error.issues.map(i => i.message).join(', ') },
         { status: 400 }
       );
     }
@@ -46,7 +63,9 @@ export async function POST(request: NextRequest) {
       pickupLocation,
       dropoffLocation,
       pickupDateTime,
+      bookingMode,
       carType,
+      fareAmount,
       specialInstructions,
       pickupLatitude,
       pickupLongitude,
@@ -57,48 +76,125 @@ export async function POST(request: NextRequest) {
       dropoffPlaceId,
       dropoffLocationSource,
     } = result.data;
-    const id = crypto.randomUUID();
     const pickupAt = new Date(pickupDateTime);
+    const isRoundTrip = bookingMode === 'ROUND_TRIP';
+    const baseId = crypto.randomUUID();
+    const baseReference = createBookingReference(baseId, pickupAt);
+    const legPrice = fareAmount ?? null;
+    const commonData = {
+      bookingType,
+      fullName,
+      email: email || '',
+      phone,
+      pickupLatitude: pickupLatitude ?? null,
+      pickupLongitude: pickupLongitude ?? null,
+      pickupPlaceId: pickupPlaceId || null,
+      pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+      dropoffLatitude: dropoffLatitude ?? null,
+      dropoffLongitude: dropoffLongitude ?? null,
+      dropoffPlaceId: dropoffPlaceId || null,
+      dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+      pickupDateTime: pickupAt,
+      carType,
+      fareAmount: legPrice,
+      specialInstructions: specialInstructions || null,
+      status: 'NEW' as const,
+    };
 
-    const booking = await prisma.booking.create({
-      data: {
-        id,
-        bookingReference: createBookingReference(id, pickupAt),
-        bookingType,
-        fullName,
-        email,
-        phone,
-        pickupLocation,
-        pickupLatitude: pickupLatitude ?? null,
-        pickupLongitude: pickupLongitude ?? null,
-        pickupPlaceId: pickupPlaceId || null,
-        pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-        dropoffLocation,
-        dropoffLatitude: dropoffLatitude ?? null,
-        dropoffLongitude: dropoffLongitude ?? null,
-        dropoffPlaceId: dropoffPlaceId || null,
-        dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-        pickupDateTime: pickupAt,
-        carType,
-        specialInstructions: specialInstructions || null,
-        status: 'NEW',
-      },
-      select: bookingRecordSelect,
+    const buildLegacyData = ({
+      id,
+      bookingReference,
+      pickup,
+      dropoff,
+    }: {
+      id: string;
+      bookingReference: string;
+      pickup: string;
+      dropoff: string;
+    }) => ({
+      ...commonData,
+      id,
+      bookingReference,
+      pickupLocation: pickup,
+      dropoffLocation: dropoff,
     });
+
+    const bookingPlans = isRoundTrip
+      ? [
+          {
+            id: crypto.randomUUID(),
+            bookingReference: `${baseReference}-A`,
+            pickup: pickupLocation,
+            dropoff: dropoffLocation,
+          },
+          {
+            id: crypto.randomUUID(),
+            bookingReference: `${baseReference}-B`,
+            pickup: dropoffLocation,
+            dropoff: pickupLocation,
+          },
+        ]
+      : [
+          {
+            id: baseId,
+            bookingReference: baseReference,
+            pickup: pickupLocation,
+            dropoff: dropoffLocation,
+          },
+        ];
+
+    const bookings = await prisma.$transaction(
+      bookingPlans.map((plan) =>
+        prisma.booking.create({
+          data: buildLegacyData(plan),
+          select: publicBookingSelect,
+        })
+      )
+    );
+
+    const serializedBookings = bookings.map(serializePublicBooking);
 
     return NextResponse.json(
       {
         success: true,
         message: 'Booking created successfully',
-        data: serializeBooking(booking),
+        data: isRoundTrip ? serializedBookings : serializedBookings[0],
       },
       { status: 201 }
     );
   } catch (error) {
     console.error('Error creating booking:', error);
     return NextResponse.json(
-      { error: 'Failed to create booking' },
+      getApiErrorResponse(),
       { status: 500 }
     );
   }
+}
+
+function getApiErrorResponse() {
+  return {
+    success: false,
+    error: 'BOOKING_CREATE_FAILED',
+  };
+}
+
+function serializePublicBooking(booking: {
+  id: string;
+  bookingReference: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  pickupLocation: string;
+  dropoffLocation: string;
+  pickupDateTime: Date;
+  carType: string;
+  fareAmount: unknown;
+  specialInstructions: string | null;
+  status: string;
+}) {
+  return {
+    ...booking,
+    pickupDateTime: booking.pickupDateTime.toISOString(),
+    fareAmount: booking.fareAmount === null ? null : Number(booking.fareAmount),
+  };
 }

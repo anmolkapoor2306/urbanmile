@@ -17,7 +17,9 @@ export interface BookingFormData {
   pickupLocation: string;
   dropoffLocation: string;
   pickupDateTime: string;
+  bookingMode?: 'ONE_WAY' | 'ROUND_TRIP';
   carType: 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
+  fareAmount?: number | null;
   specialInstructions?: string;
   pickupLatitude?: number | null;
   pickupLongitude?: number | null;
@@ -43,6 +45,7 @@ export type Booking = {
   pickupLocation: string;
   dropoffLocation: string;
   pickupDateTime: Date;
+  bookingMode?: string | null;
   carType:CarType;
   specialInstructions: string | null;
   status: BookingStatus;
