@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCarTypeDisplay } from '@/lib/utils';
 
 export function EditableVehiculeTypeSelect({ carType, bookingId }: { carType: string; bookingId: string }) {
   const [selectedType, setSelectedType] = useState(carType);

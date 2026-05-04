@@ -1,191 +1,251 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { createQuickBooking } from '@/lib/api';
+
+const destinations = ['Amritsar', 'Chandigarh', 'Delhi Airport'];
 
 export default function BookRide() {
   const router = useRouter();
-  const [form, setForm] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    pickupDate: '',
-    pickupTime: '',
-    pickupLocation: '',
-    dropLocation: '',
-    vehicleType: 'Economy',
-    specialInstructions: '',
-  });
+  const [pickupLocation, setPickupLocation] = useState('Jalandhar');
+  const [dropoffLocation, setDropoffLocation] = useState('');
+  const [phone, setPhone] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const getLocalIP = () => {
-    return '192.168.1.42';
-  };
+  const handleBook = async () => {
+    if (isSubmitting) {
+      return;
+    }
 
-  const handleSubmit = async () => {
-    if (isSubmitting) return;
-    
+    const phoneDigits = phone.replace(/\D/g, '');
+
+    if (!pickupLocation.trim()) {
+      setError('Enter pickup location');
+      return;
+    }
+
+    if (!dropoffLocation.trim()) {
+      setError('Enter dropoff location');
+      return;
+    }
+
+    if (phoneDigits.length < 10) {
+      setError('Enter a valid phone number');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
-    
-    try {
-      const localIP = await getLocalIP();
-      const apiUrl = `http://${localIP}:3000/api/bookings/public`;
-      
-      const bookingData = {
-        bookingType: 'PERSONAL',
-        fullName: form.fullName,
-        email: form.email,
-        phone: form.phone,
-        pickupLocation: form.pickupLocation,
-        dropoffLocation: form.dropLocation,
-        pickupDateTime: `${form.pickupDate}T${form.pickupTime}`,
-        carType: form.vehicleType.toUpperCase().replace('(', '').replace(')', '').replace('/', '_'),
-        specialInstructions: form.specialInstructions,
-      };
-      
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(bookingData),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create booking');
-      }
-      
-      const result = await response.json();
-      
-      if (result.success && result.data) {
-        router.push({
-          pathname: '/confirmation',
-          params: { reference: result.data.bookingReference },
-        });
-      } else {
-        throw new Error('Booking created but no reference returned');
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create booking. Please try again.';
 
-      console.error('Booking error:', err);
-      setError(message);
-      Alert.alert('Booking Failed', message);
+    try {
+      const result = await createQuickBooking({
+        pickupLocation: pickupLocation.trim(),
+        dropoffLocation: dropoffLocation.trim(),
+        phone: phoneDigits,
+      });
+
+      if (!result.success || !result.data?.bookingReference) {
+        throw new Error(result.error || 'Could not create booking');
+      }
+
+      router.push({
+        pathname: '/confirmation',
+        params: { reference: result.data.bookingReference },
+      });
+    } catch {
+      setError('Could not book right now. Call support or try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Book Your Ride</Text>
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>Pickup now · Sedan</Text>
+          <Text style={styles.title}>Book in seconds</Text>
+          <Text style={styles.subtitle}>Enter destination and phone. We will confirm the ride right away.</Text>
+        </View>
 
-      <View style={styles.form}>
-        <Text style={styles.label}>Full Name</Text>
-        <TextInput style={styles.input} value={form.fullName} onChangeText={(text) => setForm({ ...form, fullName: text })} placeholder="John Doe" placeholderTextColor="#aaaaaa" />
+        <View style={styles.card}>
+          <TextInput
+            value={pickupLocation}
+            onChangeText={(value) => {
+              setPickupLocation(value);
+              setError('');
+            }}
+            placeholder="Pickup location"
+            placeholderTextColor="#A29A90"
+            style={styles.input}
+            returnKeyType="next"
+          />
+          <TextInput
+            value={dropoffLocation}
+            onChangeText={(value) => {
+              setDropoffLocation(value);
+              setError('');
+            }}
+            placeholder="Dropoff location"
+            placeholderTextColor="#A29A90"
+            style={styles.input}
+            returnKeyType="next"
+          />
 
-        <Text style={styles.label}>Email</Text>
-        <TextInput style={styles.input} value={form.email} onChangeText={(text) => setForm({ ...form, email: text })} placeholder="email@example.com" placeholderTextColor="#aaaaaa" keyboardType="email-address" />
+          <View style={styles.chips}>
+            {destinations.map((city) => (
+              <Pressable
+                key={city}
+                style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
+                onPress={() => {
+                  setDropoffLocation(city);
+                  setError('');
+                }}>
+                <Text style={styles.chipText}>{city}</Text>
+              </Pressable>
+            ))}
+          </View>
 
-        <Text style={styles.label}>Phone</Text>
-        <TextInput style={styles.input} value={form.phone} onChangeText={(text) => setForm({ ...form, phone: text })} placeholder="(123) 456-7890" placeholderTextColor="#aaaaaa" keyboardType="phone-pad" />
+          <TextInput
+            value={phone}
+            onChangeText={(value) => {
+              setPhone(value);
+              setError('');
+            }}
+            placeholder="Phone number"
+            placeholderTextColor="#A29A90"
+            keyboardType="phone-pad"
+            style={styles.input}
+            returnKeyType="done"
+          />
 
-        <Text style={styles.label}>Pickup Date</Text>
-        <TextInput style={styles.input} value={form.pickupDate} onChangeText={(text) => setForm({ ...form, pickupDate: text })} placeholder="YYYY-MM-DD" placeholderTextColor="#aaaaaa" />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <Text style={styles.label}>Pickup Time</Text>
-        <TextInput style={styles.input} value={form.pickupTime} onChangeText={(text) => setForm({ ...form, pickupTime: text })} placeholder="HH:MM AM/PM" placeholderTextColor="#aaaaaa" />
-
-        <Text style={styles.label}>Pickup Location</Text>
-        <TextInput style={styles.input} value={form.pickupLocation} onChangeText={(text) => setForm({ ...form, pickupLocation: text })} placeholder="Street address or landmark" placeholderTextColor="#aaaaaa" />
-
-        <Text style={styles.label}>Drop Location</Text>
-        <TextInput style={styles.input} value={form.dropLocation} onChangeText={(text) => setForm({ ...form, dropLocation: text })} placeholder="Destination address" placeholderTextColor="#aaaaaa" />
-
-        <Text style={styles.label}>Vehicle Type</Text>
-        <TextInput style={styles.input} value={form.vehicleType} onChangeText={(text) => setForm({ ...form, vehicleType: text })} placeholder="Economy/SUV/Luxury" placeholderTextColor="#aaaaaa" />
-
-        <Text style={styles.label}>Special Instructions</Text>
-        <TextInput style={[styles.input, styles.textArea]} value={form.specialInstructions} onChangeText={(text) => setForm({ ...form, specialInstructions: text })} placeholder="Accessibility needs, luggage, etc." placeholderTextColor="#aaaaaa" multiline />
-
-        <Pressable onPress={handleSubmit} style={styles.button} disabled={isSubmitting}>
-          {isSubmitting ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <Text style={styles.buttonText}>Book Now</Text>
-          )}
-        </Pressable>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
-    </ScrollView>
+          <Pressable
+            onPress={handleBook}
+            disabled={isSubmitting}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.pressed,
+              isSubmitting && styles.disabledButton,
+            ]}>
+            <Text style={styles.buttonText}>{isSubmitting ? 'Booking...' : 'Book Now'}</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#F8F3EA',
   },
-  contentContainer: {
+  screen: {
+    flex: 1,
+  },
+  content: {
     padding: 20,
     paddingBottom: 40,
   },
   header: {
-    marginBottom: 30,
+    paddingTop: 14,
+    paddingBottom: 24,
+  },
+  eyebrow: {
+    color: '#6B645A',
+    fontSize: 13,
+    fontWeight: '800',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    marginTop: 8,
+    color: '#111111',
+    fontSize: 36,
+    lineHeight: 40,
+    fontWeight: '900',
   },
-  form: {
-    gap: 15,
-  },
-  label: {
-    fontSize: 16,
-    color: '#ffffff',
-    marginBottom: 8,
+  subtitle: {
+    maxWidth: 320,
+    marginTop: 10,
+    color: '#6B645A',
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '500',
   },
+  card: {
+    borderRadius: 30,
+    backgroundColor: '#FFFDF8',
+    padding: 18,
+    shadowColor: '#251B10',
+    shadowOpacity: 0.13,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 9,
+  },
   input: {
-    backgroundColor: '#333333',
-    color: '#ffffff',
-    padding: 16,
-    borderRadius: 10,
-    fontSize: 16,
+    minHeight: 56,
+    borderRadius: 22,
+    backgroundColor: '#F8F3EA',
     borderWidth: 1,
-    borderColor: '#444444',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  button: {
-    backgroundColor: '#f7931e',
-    padding: 16,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  buttonText: {
-    color: '#ffffff',
+    borderColor: '#EDE2D4',
+    color: '#111111',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  chip: {
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    backgroundColor: '#FFF7D7',
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#F2E1A3',
+  },
+  chipText: {
+    color: '#5D5142',
+    fontSize: 12,
+    fontWeight: '800',
   },
   errorText: {
-    color: '#ff6b6b',
-    fontSize: 14,
-    marginTop: 10,
-    textAlign: 'center',
+    marginBottom: 10,
+    color: '#B42318',
+    fontSize: 13,
+    fontWeight: '700',
   },
-  error: {
-      color: 'red',
-      fontSize: 14,
-      marginTop: 10,
-      textAlign: 'center',
-    },
+  button: {
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 28,
+    backgroundColor: '#111111',
+    shadowColor: '#111111',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  disabledButton: {
+    opacity: 0.72,
+  },
+  pressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
+  },
 });

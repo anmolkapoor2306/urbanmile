@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
@@ -100,6 +101,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         vendorId: true,
         vehicleId: true,
         status: true,
+        pickupDateTime: true,
         fareAmount: true,
         assignmentType: true,
       },
@@ -109,8 +111,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    const data: Record<string, string | null | Date | undefined> = {};
+    const data: Record<string, unknown> = {};
     let assignmentType = booking.assignmentType;
+    let assignedDriverId: string | null | undefined;
 
     if (result.data.driverId !== undefined) {
       if (result.data.driverId === null) {
@@ -120,16 +123,40 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       } else {
         const driver = await prisma.driver.findFirst({
           where: { id: result.data.driverId, isActive: true },
-          select: { id: true, driverType: true },
+          select: { id: true, driverType: true, availabilityStatus: true },
         });
 
         if (!driver) {
           return NextResponse.json({ error: 'Only active drivers can be assigned' }, { status: 400 });
         }
 
+        if (driver.availabilityStatus !== 'AVAILABLE' && driver.id !== booking.driverId) {
+          return NextResponse.json({ error: 'This driver is not available for assignment' }, { status: 400 });
+        }
+
+        const pickupWindowStart = new Date(booking.pickupDateTime.getTime() - 4 * 60 * 60 * 1000);
+        const pickupWindowEnd = new Date(booking.pickupDateTime.getTime() + 4 * 60 * 60 * 1000);
+        const conflict = await prisma.booking.findFirst({
+          where: {
+            id: { not: booking.id },
+            driverId: driver.id,
+            status: { in: ['ASSIGNED', 'ACTIVE'] },
+            pickupDateTime: {
+              gte: pickupWindowStart,
+              lte: pickupWindowEnd,
+            },
+          },
+          select: { id: true, bookingReference: true },
+        });
+
+        if (conflict) {
+          return NextResponse.json({ error: 'This driver already has a conflicting assigned or active trip' }, { status: 409 });
+        }
+
         data.driverId = driver.id;
         data.assignedAt = new Date();
         assignmentType = driver.driverType === 'OWN' ? 'OWN_DRIVER' : 'OUTSOURCED_DRIVER';
+        assignedDriverId = driver.id;
       }
     }
 
@@ -229,10 +256,38 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     data.netEarningAmount = financials.netEarningAmount;
     data.driverEarning = financials.driverEarning;
 
-    const updatedBooking = await prisma.booking.update({
-      where: { id },
-      data,
-      select: bookingRecordSelect,
+    const updatedBooking = await prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: { id },
+        data,
+        select: bookingRecordSelect,
+      });
+
+      const activeDriverId = assignedDriverId ?? updated.driverId ?? booking.driverId;
+
+      if (assignedDriverId) {
+        await tx.driver.update({
+          where: { id: assignedDriverId },
+          data: { availabilityStatus: 'BUSY' },
+        });
+      }
+
+      if (booking.driverId && assignedDriverId && booking.driverId !== assignedDriverId) {
+        await releaseDriverIfIdle(tx, booking.driverId);
+      }
+
+      if ((updated.status === 'COMPLETED' || updated.status === 'CANCELLED') && activeDriverId) {
+        await releaseDriverIfIdle(tx, activeDriverId, updated.id);
+      }
+
+      if ((updated.status === 'ASSIGNED' || updated.status === 'ACTIVE') && activeDriverId) {
+        await tx.driver.update({
+          where: { id: activeDriverId },
+          data: { availabilityStatus: 'BUSY' },
+        });
+      }
+
+      return updated;
     });
 
     return NextResponse.json({ success: true, data: serializeBooking(updatedBooking) });
@@ -243,3 +298,25 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 }
 
 export const dynamic = 'force-dynamic';
+
+async function releaseDriverIfIdle(
+  tx: Prisma.TransactionClient,
+  driverId: string,
+  excludeBookingId?: string
+) {
+  const remainingTrip = await tx.booking.findFirst({
+    where: {
+      driverId,
+      id: excludeBookingId ? { not: excludeBookingId } : undefined,
+      status: { in: ['ASSIGNED', 'ACTIVE'] },
+    },
+    select: { id: true },
+  });
+
+  if (!remainingTrip) {
+    await tx.driver.update({
+      where: { id: driverId },
+      data: { availabilityStatus: 'AVAILABLE' },
+    });
+  }
+}

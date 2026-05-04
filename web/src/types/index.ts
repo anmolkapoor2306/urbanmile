@@ -34,11 +34,19 @@ export interface BookingFormData {
 export type BookingStatus = 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 export type CarType = 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
 export type DriverType = 'OWN' | 'THIRD_PARTY' | 'VENDOR';
-export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
+export type PaymentStatus = 'UNPAID' | 'PAID' | 'PENDING' | 'REFUNDED' | 'PARTIAL';
 
 export type Booking = {
   id: string;
+  publicBookingId?: string;
   bookingReference: string;
+  internalBookingReference?: string;
+  customerPublicId?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  roundTripGroupId?: string | null;
+  parentPublicBookingId?: string | null;
   fullName: string;
   email: string;
   phone: string;

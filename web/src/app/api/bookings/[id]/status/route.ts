@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
 import { requireAdminAuth } from '@/lib/adminAuth';
@@ -18,7 +19,6 @@ function buildStatusUpdateData(status: (typeof BOOKING_STATUSES)[number]) {
     startedAt: status === 'ACTIVE' ? now : status === 'NEW' || status === 'CONFIRMED' || status === 'ASSIGNED' ? null : undefined,
     completedAt: status === 'COMPLETED' ? now : null,
     cancelledAt: status === 'CANCELLED' ? now : null,
-    archivedAt: status === 'COMPLETED' || status === 'CANCELLED' ? now : null,
   };
 }
 
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const existingBooking = await prisma.booking.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, driverId: true },
     });
 
     if (!existingBooking) {
@@ -50,10 +50,25 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       );
     }
 
-    const booking = await prisma.booking.update({
-      where: { id },
-      data: buildStatusUpdateData(result.data.status),
-      select: bookingRecordSelect,
+    const booking = await prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: { id },
+        data: buildStatusUpdateData(result.data.status),
+        select: bookingRecordSelect,
+      });
+
+      if (existingBooking.driverId && (result.data.status === 'ASSIGNED' || result.data.status === 'ACTIVE')) {
+        await tx.driver.update({
+          where: { id: existingBooking.driverId },
+          data: { availabilityStatus: 'BUSY' },
+        });
+      }
+
+      if (existingBooking.driverId && (result.data.status === 'COMPLETED' || result.data.status === 'CANCELLED')) {
+        await releaseDriverIfIdle(tx, existingBooking.driverId, existingBooking.id);
+      }
+
+      return updated;
     });
 
     return NextResponse.json({
@@ -61,15 +76,35 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       message: 'Booking status updated successfully',
       data: serializeBooking(booking),
     });
-    } catch (error) {
-      console.error('🐛 Detailed error updating booking status:', error);
-      console.log('📌 error.message:', (error as Error)?.message);
-      console.log('📌 error.stack:', (error as Error)?.stack);
+  } catch (error) {
+      console.error('Error updating booking status:', error);
       return NextResponse.json(
-        { error: 'Failed to update booking status', details: (error as Error)?.message },
+        { error: 'Failed to update booking status' },
         { status: 500 }
       );
-    }
+  }
 }
 
 export const dynamic = 'force-dynamic';
+
+async function releaseDriverIfIdle(
+  tx: Prisma.TransactionClient,
+  driverId: string,
+  excludeBookingId?: string
+) {
+  const remainingTrip = await tx.booking.findFirst({
+    where: {
+      driverId,
+      id: excludeBookingId ? { not: excludeBookingId } : undefined,
+      status: { in: ['ASSIGNED', 'ACTIVE'] },
+    },
+    select: { id: true },
+  });
+
+  if (!remainingTrip) {
+    await tx.driver.update({
+      where: { id: driverId },
+      data: { availabilityStatus: 'AVAILABLE' },
+    });
+  }
+}

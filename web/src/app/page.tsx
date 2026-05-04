@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { Clock, Headphones, IndianRupee, ShieldCheck } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { BookingForm } from '@/components/form/BookingForm';
+import { FindBookingForm } from '@/components/form/FindBookingForm';
 
 const features = [
   {
@@ -54,6 +55,7 @@ export default function Home() {
 
               <div className="w-full max-w-[560px] rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_28px_80px_rgba(15,23,42,0.13)] dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30">
                 <BookingForm />
+                <FindBookingForm />
               </div>
             </div>
           </div>

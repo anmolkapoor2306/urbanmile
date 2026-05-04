@@ -1,6 +1,6 @@
 export const BOOKING_STATUSES = ['NEW', 'CONFIRMED', 'ASSIGNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const;
 export const DRIVER_TYPES = ['OWN', 'THIRD_PARTY', 'VENDOR'] as const;
-export const PAYMENT_STATUSES = ['UNPAID', 'PARTIAL', 'PAID'] as const;
+export const PAYMENT_STATUSES = ['UNPAID', 'PAID', 'PENDING', 'REFUNDED', 'PARTIAL'] as const;
 export const ASSIGNMENT_TYPES = ['OWN_DRIVER', 'OUTSOURCED_DRIVER', 'MANUAL_OUTSOURCED'] as const;
 
 export type BookingStatusValue = (typeof BOOKING_STATUSES)[number];
@@ -12,8 +12,8 @@ export const dispatchGroups: Array<{
   key: BookingStatusValue;
   title: string;
 }> = [
-  { key: 'NEW', title: 'New Requests' },
-  { key: 'CONFIRMED', title: 'Confirmed' },
+  { key: 'NEW', title: 'Legacy New' },
+  { key: 'CONFIRMED', title: 'Needs Assignment' },
   { key: 'ASSIGNED', title: 'Assigned / Upcoming' },
   { key: 'ACTIVE', title: 'Active' },
   { key: 'COMPLETED', title: 'Completed' },
@@ -22,8 +22,8 @@ export const dispatchGroups: Array<{
 
 export function getBookingStatusLabel(status: BookingStatusValue): string {
   const labelMap: Record<BookingStatusValue, string> = {
-    NEW: 'New',
-    CONFIRMED: 'Confirmed',
+    NEW: 'Legacy New',
+    CONFIRMED: 'Needs Assignment',
     ASSIGNED: 'Assigned',
     ACTIVE: 'Active',
     COMPLETED: 'Complete',
@@ -45,8 +45,10 @@ export function getDriverTypeLabel(driverType: DriverTypeValue): string {
 export function getPaymentStatusLabel(status: PaymentStatusValue): string {
   const labelMap: Record<PaymentStatusValue, string> = {
     UNPAID: 'Unpaid',
-    PARTIAL: 'Partially Paid',
     PAID: 'Paid',
+    PENDING: 'Pending',
+    REFUNDED: 'Refunded',
+    PARTIAL: 'Pending',
   };
 
   return labelMap[status];

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
 import prisma from '@/lib/prisma';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
+import { driverRecordSelect, serializeDriver } from '@/lib/driverRecord';
 import { AdminPageFrame } from '@/components/admin/AdminLayout';
 import { MainDashboard } from '@/components/admin/MainDashboard';
 
@@ -12,16 +13,21 @@ export default async function AdminPage() {
     redirect('/admin/login');
   }
 
-  const bookings = await prisma.booking.findMany({
-    where: { archivedAt: null },
-    select: bookingRecordSelect,
-    orderBy: [{ createdAt: 'desc' }],
-    take: 200,
-  });
+  const [bookings, drivers] = await Promise.all([
+    prisma.booking.findMany({
+      select: bookingRecordSelect,
+      orderBy: [{ pickupDateTime: 'asc' }],
+      take: 1000,
+    }),
+    prisma.driver.findMany({
+      select: driverRecordSelect,
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    }),
+  ]);
 
   return (
     <AdminPageFrame currentPage="dashboard">
-      <MainDashboard bookings={bookings.map(serializeBooking)} />
+      <MainDashboard bookings={bookings.map(serializeBooking)} drivers={drivers.map(serializeDriver)} />
     </AdminPageFrame>
   );
 }

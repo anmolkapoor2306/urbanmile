@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
 import prisma from '@/lib/prisma';
 import { driverRecordSelect, serializeDriver } from '@/lib/driverRecord';
+import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 import { backfillDriverCodes } from '@/lib/driverCode';
 import { AdminPageFrame, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
 import { DriverManagementTable } from '@/components/admin/DriverManagementTable';
@@ -15,12 +16,21 @@ export default async function DriversPage() {
 
   await backfillDriverCodes(prisma);
 
-  const drivers = await prisma.driver.findMany({
-    select: driverRecordSelect,
-    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-  });
+  const [drivers, bookings] = await Promise.all([
+    prisma.driver.findMany({
+      select: driverRecordSelect,
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    }),
+    prisma.booking.findMany({
+      where: { status: { in: ['ASSIGNED', 'ACTIVE'] } },
+      select: bookingRecordSelect,
+      orderBy: [{ pickupDateTime: 'asc' }],
+      take: 500,
+    }),
+  ]);
 
   const serializedDrivers = drivers.map(serializeDriver);
+  const serializedBookings = bookings.map(serializeBooking);
 
   return (
     <AdminPageFrame currentPage="drivers">
@@ -28,8 +38,8 @@ export default async function DriversPage() {
           <AdminStatsGrid className="xl:grid-cols-4">
             {[
               ['Total Drivers', serializedDrivers.length],
-              ['Available', serializedDrivers.filter((driver) => driver.availabilityStatus === 'AVAILABLE').length],
-              ['Busy', serializedDrivers.filter((driver) => driver.availabilityStatus === 'BUSY').length],
+              ['Available', serializedDrivers.filter((driver) => driver.isActive && driver.availabilityStatus === 'AVAILABLE').length],
+              ['Assigned / On Trip', serializedBookings.length],
               ['Vendors', serializedDrivers.filter((driver) => driver.driverType === 'VENDOR').length],
             ].map(([label, value]) => (
               <AdminStatCard key={label} label={label} value={value} />
@@ -37,7 +47,7 @@ export default async function DriversPage() {
           </AdminStatsGrid>
 
           <div className="flex w-full min-w-0 flex-1 min-h-0 overflow-hidden">
-            <DriverManagementTable drivers={serializedDrivers} />
+            <DriverManagementTable drivers={serializedDrivers} bookings={serializedBookings} />
           </div>
       </div>
     </AdminPageFrame>

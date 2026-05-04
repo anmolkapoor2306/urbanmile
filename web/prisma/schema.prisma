@@ -10,6 +10,7 @@ datasource db {
 
 model Booking {
   id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicBookingId       String                 @unique
   bookingType           BookingType            @default(PERSONAL)
   fullName              String
   email                 String
@@ -34,6 +35,9 @@ model Booking {
   createdAt             DateTime               @default(now()) @db.Timestamp(6)
   updatedAt             DateTime               @default(now()) @updatedAt @db.Timestamp(6)
   bookingReference      String                 @unique
+  roundTripGroupId      String?
+  parentPublicBookingId String?
+  customerId            String?                @db.Uuid
   driverId              String?
   vendorId              String?
   vehicleId             String?
@@ -42,7 +46,6 @@ model Booking {
   startedAt             DateTime?
   completedAt           DateTime?
   cancelledAt           DateTime?
-  archivedAt            DateTime?
   cancelReason          String?
   fareAmount            Decimal?               @db.Decimal(10, 2)
   commissionAmount      Decimal?               @db.Decimal(10, 2)
@@ -55,16 +58,68 @@ model Booking {
   manualDriverPhone     String?
   manualVehicleDetails  String?
   driver                Driver?                @relation(fields: [driverId], references: [id])
+  customer              Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
   vendor                Vendor?                @relation(fields: [vendorId], references: [id])
   vehicle               Vehicle?               @relation(fields: [vehicleId], references: [id])
 
+  @@index([publicBookingId])
+  @@index([customerId])
+  @@index([roundTripGroupId])
   @@index([status])
   @@index([createdAt])
   @@index([driverId])
   @@index([vendorId])
   @@index([vehicleId])
   @@index([paymentStatus])
-  @@index([archivedAt])
+}
+
+model Customer {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicId       String             @unique
+  name           String
+  phone          String             @unique
+  email          String?
+  phoneVerified  Boolean            @default(false)
+  emailVerified  Boolean            @default(false)
+  dob            DateTime?          @db.Date
+  gender         CustomerGender?
+  authProvider   CustomerAuthProvider?
+  supabaseUserId String?            @unique
+  createdAt      DateTime           @default(now()) @db.Timestamp(6)
+  updatedAt      DateTime           @default(now()) @updatedAt @db.Timestamp(6)
+  bookings       Booking[]
+
+  @@index([publicId])
+  @@index([phone])
+  @@index([supabaseUserId])
+}
+
+model CustomerOtpVerification {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone       String
+  codeHash    String
+  token       String?   @unique
+  ipAddress   String?
+  attempts    Int       @default(0)
+  verifiedAt  DateTime?
+  expiresAt   DateTime  @db.Timestamp(6)
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([phone])
+  @@index([ipAddress])
+  @@index([createdAt])
+  @@index([expiresAt])
+}
+
+model RateLimitEvent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  action    String
+  phone     String?
+  ipAddress String?
+  createdAt DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([action, phone, createdAt])
+  @@index([action, ipAddress, createdAt])
 }
 
 model Driver {
@@ -168,8 +223,22 @@ enum BookingType {
 
 enum PaymentStatus {
   UNPAID
-  PARTIAL
   PAID
+  PENDING
+  REFUNDED
+  PARTIAL
+}
+
+enum CustomerGender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum CustomerAuthProvider {
+  GOOGLE
+  PHONE_GUEST
 }
 
 enum AssignmentType {

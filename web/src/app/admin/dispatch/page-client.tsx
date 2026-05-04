@@ -1,7 +1,6 @@
 'use client';
 
 import { AdminPageFrame, AdminPanel } from '@/components/admin/AdminLayout';
-import { DashboardHeader } from '@/components/admin/DashboardHeader';
 import { DispatchBoard } from '@/components/admin/DispatchBoard';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';

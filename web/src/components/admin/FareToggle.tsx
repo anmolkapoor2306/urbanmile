@@ -22,6 +22,7 @@ export default function FareToggle({
   commissionRate = 0.1,
 }: FareToggleProps) {
   const [isCommission, setIsCommission] = useState(false);
+  void isNew;
 
   const displayValue = fareAmount
     ? isCommission
@@ -61,8 +62,9 @@ export default function FareToggle({
         onClick={onFareConfirmed}
         className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
       >
-        {isNew ? 'Confirm + Fare' : 'Save Fare'}
+        Save Fare
       </button>
+      <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">{displayValue}</span>
     </div>
   );
 }

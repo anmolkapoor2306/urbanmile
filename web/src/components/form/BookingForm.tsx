@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, FormEvent, useEffect, useRef } from 'react';
-import { CalendarClock, ChevronDown, X } from 'lucide-react';
+import { CalendarClock, ChevronDown, Navigation, ShieldCheck, X } from 'lucide-react';
 import { z } from 'zod';
 import { cn } from '@/lib/utils';
 import { CONTACT_PHONE_HREF } from '@/lib/contact';
@@ -14,6 +14,7 @@ import {
 } from '@/lib/fixedRoutePricing';
 
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
+const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -44,9 +45,23 @@ type PickupTiming = 'NOW' | 'LATER';
 type RideOption = 'SEDAN' | 'SUV';
 type LocationFieldName = 'pickupLocation' | 'dropoffLocation';
 type BookingErrorField = keyof BookingFormData | 'returnDateTime';
+type BookingAuthProvider = 'google' | 'phone_guest';
+type BookingAuthStep = 'choice' | 'otp' | 'ready';
 type BookingResponseItem = {
-  id?: string;
   bookingReference?: string;
+  publicBookingId?: string;
+  customerPublicId?: string | null;
+  pickupLocation?: string;
+  dropoffLocation?: string;
+  pickupDateTime?: string;
+  carType?: string;
+};
+
+type CustomerProfile = {
+  fullName: string;
+  email: string;
+  emailVerified: boolean;
+  supabaseUserId: string;
 };
 
 interface BookingFormProps {
@@ -55,6 +70,7 @@ interface BookingFormProps {
 }
 
 export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
+  const [isSuccess, setIsSuccess] = useState(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   const pickupTimingMenuRef = useRef<HTMLDivElement>(null);
   const pickupField = useBookingLocationField();
@@ -73,6 +89,26 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingReferences, setBookingReferences] = useState<string[]>([]);
+  const [createdBookingDetails, setCreatedBookingDetails] = useState<BookingResponseItem[]>([]);
+  const [authProvider, setAuthProvider] = useState<BookingAuthProvider>('phone_guest');
+  const [authStep, setAuthStep] = useState<BookingAuthStep>('otp');
+  const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [otpPhone, setOtpPhone] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpResendSeconds, setOtpResendSeconds] = useState(0);
+  const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [phoneVerificationToken, setPhoneVerificationToken] = useState('');
+  const [verifiedPhone, setVerifiedPhone] = useState('');
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfile>({
+    fullName: '',
+    email: '',
+    emailVerified: false,
+    supabaseUserId: '',
+  });
+  const [profileErrors, setProfileErrors] = useState<Partial<Record<keyof CustomerProfile, string>>>({});
 
   const [formData, setFormData] = useState<BookingFormData>({
     bookingType: 'PERSONAL',
@@ -96,9 +132,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   });
   const [errors, setErrors] = useState<Partial<Record<BookingErrorField, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
   const [isLocatingPickup, setIsLocatingPickup] = useState(false);
+  const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
 
   const finalPrice = priceQuote ? priceQuote.sedanPrice + (selectedRide === 'SUV' ? 1000 : 0) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
@@ -281,13 +316,118 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     }
   }, [isSuccess]);
 
+  useEffect(() => {
+    if (otpResendSeconds <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setOtpResendSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [otpResendSeconds]);
+
+  useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const accessToken = hashParams.get('access_token');
+
+    if (!accessToken || !window.location.search.includes('auth=google')) {
+      return;
+    }
+
+    const draft = window.localStorage.getItem(GOOGLE_BOOKING_DRAFT_KEY);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft) as {
+          formData?: BookingFormData;
+          bookingMode?: BookingMode;
+          pickupTiming?: PickupTiming;
+          pickupDate?: string;
+          pickupTime?: string;
+          returnDate?: string;
+          returnTime?: string;
+          selectedRide?: RideOption;
+          priceQuote?: FixedRoutePrice;
+        };
+
+        if (parsed.formData) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setFormData(parsed.formData);
+          pickupField.updateAddress(parsed.formData.pickupLocation);
+          dropoffField.updateAddress(parsed.formData.dropoffLocation);
+        }
+        if (parsed.bookingMode) setBookingMode(parsed.bookingMode);
+        if (parsed.pickupTiming) setPickupTiming(parsed.pickupTiming);
+        if (parsed.pickupDate) setPickupDate(parsed.pickupDate);
+        if (parsed.pickupTime) setPickupTime(parsed.pickupTime);
+        if (parsed.returnDate) setReturnDate(parsed.returnDate);
+        if (parsed.returnTime) setReturnTime(parsed.returnTime);
+        if (parsed.selectedRide) setSelectedRide(parsed.selectedRide);
+        if (parsed.priceQuote) setPriceQuote(parsed.priceQuote);
+      } catch {
+        window.localStorage.removeItem(GOOGLE_BOOKING_DRAFT_KEY);
+      }
+    }
+
+    const loadGoogleProfile = async () => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        setAuthError('Google sign-in is not configured yet. Continue as guest for now.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/user`, {
+          headers: {
+            apikey: supabaseAnonKey,
+            authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const user = await response.json();
+
+        if (!response.ok) {
+          throw new Error('Unable to load Google profile');
+        }
+
+        setAuthProvider('google');
+        setAuthStep('otp');
+        setCustomerProfile((prev) => ({
+          ...prev,
+          fullName: user.user_metadata?.full_name || user.user_metadata?.name || prev.fullName,
+          email: user.email || prev.email,
+          emailVerified: Boolean(user.email_confirmed_at || user.confirmed_at || user.email),
+          supabaseUserId: user.id || '',
+        }));
+        setFormData((prev) => ({
+          ...prev,
+          fullName: user.user_metadata?.full_name || user.user_metadata?.name || prev.fullName,
+          email: user.email || prev.email,
+        }));
+        window.localStorage.removeItem(GOOGLE_BOOKING_DRAFT_KEY);
+        window.history.replaceState(null, '', window.location.pathname);
+      } catch {
+        setAuthError('Google sign-in could not be completed. Continue as guest or try again.');
+      }
+    };
+
+    void loadGoogleProfile();
+    // This runs only on the OAuth redirect landing. The location field helpers are intentionally
+    // read from the initial render so the booking draft can be restored before the modal reopens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleClickAnotherBooking = () => {
     setIsSuccess(false);
     setBookingReferences([]);
+    setCreatedBookingDetails([]);
+    resetBookingAuth();
     onReset?.();
   };
 
-  const handleUseCurrentLocation = () => {
+  const handleUseCurrentLocation = async () => {
     if (!navigator.geolocation) {
       setPickupLocationError('Location is not supported on this device/browser.');
       return;
@@ -296,48 +436,204 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     setIsLocatingPickup(true);
     setPickupLocationError(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = Number(position.coords.latitude.toFixed(6));
-        const longitude = Number(position.coords.longitude.toFixed(6));
-        const fallbackLabel = `Current Location (${latitude}, ${longitude})`;
-
-        pickupField.setResolvedLocation(fallbackLabel, {
-          latitude,
-          longitude,
-          source: 'current-location',
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
         });
+      });
 
-        setFormData((prev) => ({
-          ...prev,
-          pickupLocation: fallbackLabel,
-          pickupLatitude: latitude,
-          pickupLongitude: longitude,
-          pickupPlaceId: '',
-          pickupLocationSource: 'current-location',
-        }));
+      const latitude = Number(position.coords.latitude.toFixed(6));
+      const longitude = Number(position.coords.longitude.toFixed(6));
+      const fallbackLabel = `Current Location (${latitude}, ${longitude})`;
 
-        setErrors((prev) => ({ ...prev, pickupLocation: undefined }));
-        setRouteMessage(null);
-        setPriceQuote(null);
-        setIsLocatingPickup(false);
-      },
-      (error) => {
-        const errorMessage =
-          error.code === error.PERMISSION_DENIED
-            ? 'Location permission was denied. Please enter pickup manually.'
-            : 'Unable to get your current location right now. Please enter pickup manually.';
+      pickupField.setResolvedLocation(fallbackLabel, {
+        latitude,
+        longitude,
+        source: 'current-location',
+      });
 
-        pickupField.markCurrentLocationRequested();
-        setPickupLocationError(errorMessage);
-        setIsLocatingPickup(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
+      setFormData((prev) => ({
+        ...prev,
+        pickupLocation: fallbackLabel,
+        pickupLatitude: latitude,
+        pickupLongitude: longitude,
+        pickupPlaceId: '',
+        pickupLocationSource: 'current-location',
+      }));
+
+      setErrors((prev) => ({ ...prev, pickupLocation: undefined }));
+      setRouteMessage(null);
+      setPriceQuote(null);
+    } catch (error) {
+      let errorMessage = 'Unable to get your current location right now. Please enter pickup manually.';
+      if (error instanceof GeolocationPositionError) {
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMessage = 'Location permission was denied. Please enter pickup manually.';
+        }
       }
-    );
+
+      setPickupLocationError(errorMessage);
+    } finally {
+      setIsLocatingPickup(false);
+    }
+  };
+
+  const handleContinueWithGoogle = async () => {
+    setIsAuthBusy(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch('/api/auth/google/start', { method: 'POST' });
+      const data = await response.json();
+
+      if (!response.ok || !data.url) {
+        setAuthError('Google sign-in is not configured yet. Continue as guest for now.');
+        setIsAuthBusy(false);
+        return;
+      }
+
+      window.localStorage.setItem(
+        GOOGLE_BOOKING_DRAFT_KEY,
+        JSON.stringify({
+          formData,
+          bookingMode,
+          pickupTiming,
+          pickupDate,
+          pickupTime,
+          returnDate,
+          returnTime,
+          selectedRide,
+          priceQuote,
+        })
+      );
+      window.location.href = data.url;
+    } catch {
+      setAuthError('Google sign-in could not start. Continue as guest or try again.');
+      setIsAuthBusy(false);
+    }
+  };
+
+  const handleContinueAsGuest = () => {
+    setAuthProvider('phone_guest');
+    setAuthStep('otp');
+    setAuthError(null);
+  };
+
+  const handleSendOtp = async () => {
+    if (otpResendSeconds > 0 || !otpPhone.trim()) {
+      setAuthError(!otpPhone.trim() ? 'Enter your phone number first.' : null);
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: otpPhone }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAuthError(data.error === 'OTP_RATE_LIMITED' ? 'Too many code requests. Please wait and try again.' : 'Could not send the code. Please try again.');
+        setIsAuthBusy(false);
+        return;
+      }
+
+      setOtpSent(true);
+      setOtpResendSeconds(60);
+      setDevOtpCode(null);
+      setPhoneVerified(false);
+      setPhoneVerificationToken('');
+      setVerifiedPhone('');
+      setIsAuthBusy(false);
+    } catch {
+      setAuthError('Could not send the code. Please try again.');
+      setIsAuthBusy(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpPhone.trim() || !otpCode.trim()) {
+      setAuthError('Enter your phone number and 6-digit code.');
+      return;
+    }
+    if (!customerProfile.fullName.trim()) {
+      setProfileErrors((prev) => ({ ...prev, fullName: 'Enter your full name' }));
+      setAuthError('Enter your name before verifying your phone.');
+      return;
+    }
+    if (customerProfile.email && !z.string().email().safeParse(customerProfile.email).success) {
+      setProfileErrors((prev) => ({ ...prev, email: 'Enter a valid email' }));
+      setAuthError('Enter a valid email or leave it blank.');
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: otpPhone, code: otpCode }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.verificationToken) {
+        setAuthError(data.error || 'Phone verification failed. Please try again.');
+        setIsAuthBusy(false);
+        return;
+      }
+
+      setPhoneVerificationToken(data.verificationToken);
+      setPhoneVerified(true);
+      setVerifiedPhone(data.bookingPhone || data.phone || otpPhone);
+      setFormData((prev) => ({ ...prev, phone: data.bookingPhone || data.phone || otpPhone }));
+      setCustomerProfile((prev) => ({
+        ...prev,
+        fullName: prev.fullName || formData.fullName,
+        email: prev.email || formData.email || '',
+      }));
+      setAuthStep('ready');
+      setIsAuthBusy(false);
+    } catch {
+      setAuthError('Phone verification failed. Please try again.');
+      setIsAuthBusy(false);
+    }
+  };
+
+  const handleProfileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setCustomerProfile((prev) => ({ ...prev, [name]: value }));
+    setProfileErrors((prev) => ({ ...prev, [name]: undefined }));
+  };
+
+  const resetBookingAuth = () => {
+    setAuthProvider('phone_guest');
+    setAuthStep('otp');
+    setIsAuthBusy(false);
+    setAuthError(null);
+    setOtpPhone('');
+    setOtpCode('');
+    setOtpSent(false);
+    setOtpResendSeconds(0);
+    setDevOtpCode(null);
+    setPhoneVerified(false);
+    setPhoneVerificationToken('');
+    setVerifiedPhone('');
+    setCustomerProfile({
+      fullName: '',
+      email: '',
+      emailVerified: false,
+      supabaseUserId: '',
+    });
+    setProfileErrors({});
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -398,6 +694,18 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     setErrors({});
     setBookingError(null);
 
+    if (
+      authStep !== 'ready' ||
+      !phoneVerified ||
+      !phoneVerificationToken ||
+      !verifiedPhone ||
+      !customerProfile.fullName
+    ) {
+      setBookingError('Verify your phone before booking.');
+      setIsSubmitting(false);
+      return;
+    }
+
     const pickupDateTime =
       pickupTiming === 'NOW' ? new Date().toISOString() : formData.pickupDateTime;
     const bookingValidationErrors: Partial<Record<BookingErrorField, string>> = {};
@@ -417,6 +725,9 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
     const result = bookingSchema.safeParse({
       ...formData,
+      fullName: customerProfile.fullName,
+      email: customerProfile.email,
+      phone: verifiedPhone,
       pickupDateTime,
       carType: selectedRide,
       fareAmount: finalPrice,
@@ -441,9 +752,13 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bookingType: result.data.bookingType,
-          fullName: result.data.fullName,
-          email: result.data.email,
-          phone: result.data.phone,
+          fullName: customerProfile.fullName,
+          email: customerProfile.email,
+          phone: verifiedPhone,
+          phoneVerificationToken,
+          authProvider,
+          emailVerified: customerProfile.emailVerified,
+          supabaseUserId: customerProfile.supabaseUserId || undefined,
           pickupLocation: result.data.pickupLocation,
           dropoffLocation: result.data.dropoffLocation,
           pickupDateTime: new Date(result.data.pickupDateTime).toISOString(),
@@ -476,9 +791,10 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       const createdBookings: BookingResponseItem[] = Array.isArray(data.data) ? data.data : [data.data];
       setBookingReferences(
         createdBookings
-          .map((booking) => booking?.bookingReference ?? booking?.id)
+          .map((booking) => booking?.publicBookingId ?? booking?.bookingReference)
           .filter((reference): reference is string => Boolean(reference))
       );
+      setCreatedBookingDetails(createdBookings);
       setPriceQuote(null);
       setRouteMessage(null);
       setBookingError(null);
@@ -493,6 +809,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       setPickupTiming('NOW');
       setSelectedRide('SEDAN');
       setPickupLocationError(null);
+      resetBookingAuth();
       setFormData((prev) => ({
         bookingType: prev.bookingType,
         fullName: '',
@@ -539,6 +856,9 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
           <p className="max-w-md text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
             We have your route details. Our team will confirm availability and pricing shortly.
           </p>
+          <p className="mt-3 max-w-md text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Save this booking ID to check your ride status later.
+          </p>
           {bookingReferences.length > 0 && (
             <div className="mt-4 space-y-2">
               {bookingReferences.map((reference) => (
@@ -546,8 +866,30 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                   key={reference}
                   className="rounded-full bg-white px-4 py-2 text-sm font-bold text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-zinc-100"
                 >
-                  Booking reference: {reference}
+                  Booking ID: {reference}
                 </p>
+              ))}
+            </div>
+          )}
+          {createdBookingDetails[0]?.customerPublicId && (
+            <p className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-bold text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-zinc-100">
+              Customer ID: {createdBookingDetails[0].customerPublicId}
+            </p>
+          )}
+          {createdBookingDetails.length > 0 && (
+            <div className="mt-5 w-full max-w-md space-y-2 text-left">
+              {createdBookingDetails.map((booking) => (
+                <div
+                  key={booking.publicBookingId ?? booking.bookingReference}
+                  className="rounded-2xl border border-amber-100 bg-white p-4 text-sm shadow-sm dark:border-amber-900/40 dark:bg-zinc-900"
+                >
+                  <div className="font-bold text-zinc-950 dark:text-zinc-100">
+                    {booking.pickupLocation} to {booking.dropoffLocation}
+                  </div>
+                  <div className="mt-1 text-zinc-600 dark:text-zinc-400">
+                    {booking.pickupDateTime ? formatPickupDateTime(booking.pickupDateTime) : 'Pickup time pending'} · {booking.carType ?? 'Sedan'}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -867,44 +1209,130 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <BookingField
-              name="fullName"
-              value={formData.fullName}
-              onChange={handleInputChange}
-              placeholder="Name"
-              error={errors.fullName}
-              required
-            />
-            <BookingField
-              name="phone"
-              value={formData.phone}
-              onChange={handleInputChange}
-              placeholder="Phone"
-              error={errors.phone}
-              required
-            />
-            <BookingField
-              name="email"
-              type="email"
-              value={formData.email}
-              onChange={handleInputChange}
-              placeholder="Email optional"
-              error={errors.email}
-            />
-            <div className="sm:col-span-2">
-              <textarea
-                name="specialInstructions"
-                value={formData.specialInstructions ?? ''}
-                onChange={handleInputChange}
-                placeholder="Note optional"
-                className={cn(
-                  'min-h-24 w-full resize-none rounded-[20px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-base font-medium text-zinc-950 outline-none transition-colors placeholder:text-zinc-400',
-                  'focus:border-zinc-950 focus:bg-white focus:ring-4 focus:ring-zinc-950/5',
-                  'dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-amber-300 dark:focus:bg-zinc-950 dark:focus:ring-amber-300/10'
-                )}
-              />
+          <div className="mt-5 space-y-4">
+            <div className="rounded-[20px] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="mb-4 flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                <h4 className="text-base font-bold text-zinc-950 dark:text-white">Verify customer details</h4>
+              </div>
+
+              {authStep === 'choice' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleContinueWithGoogle}
+                    disabled={isAuthBusy}
+                    className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-70 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  >
+                    Continue with Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleContinueAsGuest}
+                    className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+                  >
+                    Continue as Guest with Phone
+                  </button>
+                </div>
+              )}
+
+              {authStep === 'otp' && (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <BookingField
+                      name="fullName"
+                      value={customerProfile.fullName}
+                      onChange={handleProfileChange}
+                      placeholder="Full name"
+                      error={profileErrors.fullName}
+                      required
+                    />
+                    <BookingField
+                      name="email"
+                      type="email"
+                      value={customerProfile.email}
+                      onChange={handleProfileChange}
+                      placeholder="Email optional"
+                      error={profileErrors.email}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <BookingField
+                      name="otpPhone"
+                      value={otpPhone}
+                      onChange={(event) => {
+                        setOtpPhone(event.target.value);
+                        setPhoneVerified(false);
+                        setPhoneVerificationToken('');
+                        setVerifiedPhone('');
+                        setAuthError(null);
+                      }}
+                      placeholder="Phone number"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendOtp}
+                      disabled={isAuthBusy || otpResendSeconds > 0}
+                      className="flex min-h-13 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                    >
+                      {otpResendSeconds > 0 ? `Resend ${otpResendSeconds}s` : otpSent ? 'Resend code' : 'Send code'}
+                    </button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <BookingField
+                      name="otpCode"
+                      value={otpCode}
+                      onChange={(event) => {
+                        setOtpCode(event.target.value);
+                        setAuthError(null);
+                      }}
+                      placeholder="6-digit code"
+                      inputMode="numeric"
+                      maxLength={6}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyOtp}
+                      disabled={isAuthBusy || !otpSent || !otpCode.trim()}
+                      className="flex min-h-13 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+                    >
+                      Verify code
+                    </button>
+                  </div>
+                  {devOtpCode && (
+                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                      Dev code: {devOtpCode}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {authStep === 'ready' && (
+                <div className="rounded-[18px] bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+                  Phone verified. You can now book your ride.
+                </div>
+              )}
+
+              {authError && (
+                <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                  {authError}
+                </div>
+              )}
             </div>
+
+            <textarea
+              name="specialInstructions"
+              value={formData.specialInstructions ?? ''}
+              onChange={handleInputChange}
+              placeholder="Note optional"
+              className={cn(
+                'min-h-24 w-full resize-none rounded-[20px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-base font-medium text-zinc-950 outline-none transition-colors placeholder:text-zinc-400',
+                'focus:border-zinc-950 focus:bg-white focus:ring-4 focus:ring-zinc-950/5',
+                'dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-amber-300 dark:focus:bg-zinc-950 dark:focus:ring-amber-300/10'
+              )}
+            />
           </div>
 
           {bookingError && (
@@ -924,7 +1352,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
             <button
               type="button"
               onClick={handleBookNow}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !phoneVerified}
               className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
             >
               {isSubmitting ? 'Booking...' : 'Book Now'}
@@ -948,6 +1376,9 @@ interface BookingFieldProps extends React.InputHTMLAttributes<HTMLInputElement> 
   suggestions?: string[];
   highlightedSuggestionIndex?: number;
   onSuggestionSelect?: (cityName: string) => void;
+  showLocationIcon?: boolean;
+  onLocationIconClick?: () => void;
+  isLoadingLocation?: boolean;
 }
 
 function BookingField({

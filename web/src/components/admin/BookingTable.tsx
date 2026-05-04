@@ -2,15 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { adminInputClassName, adminInsetClassName, adminSecondaryButtonClassName } from '@/components/admin/AdminLayout';
-import type { BookingStatusValue } from '@/lib/dispatch';
+import { adminInputClassName, adminInsetClassName } from '@/components/admin/AdminLayout';
+import { getPaymentStatusLabel, type BookingStatusValue, type PaymentStatusValue } from '@/lib/dispatch';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn } from '@/lib/utils';
 import type { CarType } from '@/types';
 
 export interface AdminBooking {
   id: string;
+  publicBookingId?: string;
   bookingReference: string;
+  customerPublicId?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
   fullName: string;
   email: string;
   phone: string;
@@ -21,7 +26,7 @@ export interface AdminBooking {
   specialInstructions: string | null;
   status: BookingStatusValue;
   fareAmount?: number | null;
-  paymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID';
+  paymentStatus?: PaymentStatusValue;
   assignmentType?: 'OWN_DRIVER' | 'OUTSOURCED_DRIVER' | 'MANUAL_OUTSOURCED' | null;
   driver?: {
     id: string;
@@ -34,7 +39,6 @@ export interface AdminBooking {
   manualVendorName?: string | null;
   manualDriverName?: string | null;
   createdAt: string;
-  archivedAt?: string | null;
 }
 
 const vehicleTypeOptions: Array<{ value: string; label: string }> = [
@@ -52,39 +56,39 @@ const STATUS_PILLS: Array<{
 }> = [
   {
     value: 'NEW',
-    label: 'New/Unassigned',
-    activeClassName: 'bg-amber-500 text-white dark:bg-amber-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    label: 'Legacy New',
+    activeClassName: 'bg-zinc-700 text-white',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
     value: 'CONFIRMED',
-    label: 'Confirmed',
-    activeClassName: 'bg-blue-500 text-white dark:bg-blue-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    label: 'Needs Assignment',
+    activeClassName: 'bg-amber-500 text-zinc-950',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
     value: 'ASSIGNED',
     label: 'Assigned',
     activeClassName: 'bg-violet-500 text-white dark:bg-violet-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
     value: 'ACTIVE',
     label: 'Active',
     activeClassName: 'bg-cyan-600 text-white border-cyan-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
     value: 'COMPLETED',
     label: 'Complete',
     activeClassName: 'bg-green-500 text-white dark:bg-green-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
     value: 'CANCELLED',
     label: 'Cancelled',
     activeClassName: 'bg-red-500 text-white dark:bg-red-600',
-    inactiveClassName: 'border border-zinc-700 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
+    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
 ];
 
@@ -93,6 +97,7 @@ const statusPillBaseClassName =
 
 export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [pickupDateSort, setPickupDateSort] = useState<'newest' | 'oldest'>('oldest');
   const [showArchived, setShowArchived] = useState(false);
@@ -102,18 +107,23 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 
     return [...bookings]
       .filter((booking) => {
-        const matchesArchive = showArchived ? booking.archivedAt !== null : booking.archivedAt === null;
+        const isArchivedStatus = booking.status === 'COMPLETED' || booking.status === 'CANCELLED';
+        const matchesArchive = showArchived ? isArchivedStatus : !isArchivedStatus;
         const matchesStatus = filterStatus === 'all' || booking.status === filterStatus;
+        const matchesPaymentStatus = filterPaymentStatus === 'all' || booking.paymentStatus === filterPaymentStatus;
 
         const matchesSearch =
+          (booking.publicBookingId || '').toLowerCase().includes(query) ||
           booking.bookingReference.toLowerCase().includes(query) ||
+          (booking.customerPublicId || '').toLowerCase().includes(query) ||
+          (booking.customerName || '').toLowerCase().includes(query) ||
           booking.fullName.toLowerCase().includes(query) ||
           booking.phone.includes(searchQuery) ||
           booking.pickupLocation.toLowerCase().includes(query) ||
           booking.dropoffLocation.toLowerCase().includes(query) ||
           getBookingDisplayAssignee(booking).toLowerCase().includes(query);
 
-        return matchesArchive && matchesStatus && matchesSearch;
+        return matchesArchive && matchesStatus && matchesPaymentStatus && matchesSearch;
       })
       .sort((left, right) => {
         const leftPickup = getPickupDateTimeValue(left.pickupDateTime);
@@ -121,7 +131,7 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 
         return pickupDateSort === 'newest' ? rightPickup - leftPickup : leftPickup - rightPickup;
       });
-  }, [bookings, filterStatus, pickupDateSort, searchQuery, showArchived]);
+  }, [bookings, filterPaymentStatus, filterStatus, pickupDateSort, searchQuery, showArchived]);
 
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
@@ -141,12 +151,25 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
               className={cn(adminInputClassName, 'md:w-[220px]')}
             >
               <option value="all">All Statuses</option>
-              <option value="NEW">New</option>
-              <option value="CONFIRMED">Confirmed</option>
+              <option value="NEW">Legacy New</option>
+              <option value="CONFIRMED">Needs Assignment</option>
               <option value="ASSIGNED">Assigned</option>
               <option value="ACTIVE">Active</option>
               <option value="COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
+            </select>
+
+            <select
+              value={filterPaymentStatus}
+              onChange={(e) => setFilterPaymentStatus(e.target.value)}
+              className={cn(adminInputClassName, 'md:w-[190px]')}
+            >
+              <option value="all">All Payments</option>
+              <option value="UNPAID">Unpaid</option>
+              <option value="PAID">Paid</option>
+              <option value="PENDING">Pending</option>
+              <option value="REFUNDED">Refunded</option>
+              <option value="PARTIAL">Legacy Partial</option>
             </select>
 
               <select
@@ -158,15 +181,15 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
                 <option value="newest">Latest First</option>
               </select>
             
-            <div className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-950 p-1">
+            <div className="inline-flex items-center rounded-full border border-zinc-300 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-900">
               <button
                 type="button"
                                 onClick={() => setShowArchived(false)}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
                   !showArchived
-                    ? 'bg-zinc-100 text-zinc-950'
-                    : 'text-zinc-400 hover:text-zinc-100'
+                    ? 'bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                    : 'text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'
                 )}
               >
                 Active
@@ -177,8 +200,8 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
                   showArchived
-                    ? 'bg-zinc-100 text-zinc-950'
-                    : 'text-zinc-400 hover:text-zinc-100'
+                    ? 'bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                    : 'text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'
                 )}
               >
                 Archived
@@ -194,7 +217,7 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 
       <div className="dashboard-scrollbar mt-4 flex-1 min-h-0 overflow-y-auto pr-1">
         {filteredBookings.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 px-6 py-10 text-center text-sm text-zinc-500">
+          <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
             No bookings found
           </div>
         ) : (
@@ -397,16 +420,26 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 
   return (
     <article className={cn(
-      'w-full rounded-2xl border border-zinc-800 bg-zinc-950/70 px-6 py-4 shadow-[0_12px_32px_rgba(0,0,0,0.18)] transition-all duration-500 hover:border-zinc-700',
+      'w-full rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm transition-all duration-500 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700',
       isFadingOut && 'pointer-events-none -translate-y-2 opacity-0'
     )}>
       <div className="flex flex-col gap-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-start">
           <div className="min-w-0 xl:justify-self-start">
-            <div className="text-base font-bold text-zinc-100">{toTitleCase(booking.fullName)}</div>
-            <div className="mt-1 text-sm text-zinc-500">
-              {booking.phone}
+            <div className="text-base font-bold text-zinc-950 dark:text-zinc-100">{toTitleCase(booking.customerName || booking.fullName)}</div>
+            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              {booking.customerPhone || booking.phone}
             </div>
+            {(booking.customerEmail || booking.email) && (
+              <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                {booking.customerEmail || booking.email}
+              </div>
+            )}
+            {booking.customerPublicId && (
+              <div className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                Customer {booking.customerPublicId}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2 xl:self-start">
@@ -431,14 +464,14 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
           </div>
 
           <div className="text-left xl:justify-self-end xl:self-start xl:text-right">
-            <div className="text-sm font-semibold text-zinc-100">{booking.bookingReference}</div>
-            <div className="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500">
+            <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">{booking.publicBookingId || booking.bookingReference}</div>
+            <div className="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
               {formatDate(booking.createdAt)}
             </div>
           </div>
         </div>
 
-        <div className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-5">
           <Info label="Route" value={`${booking.pickupLocation} → ${booking.dropoffLocation}`} />
           <Info label="Pickup" value={formatPickupDateTimeDisplay(booking.pickupDateTime)} />
           <label>
@@ -447,7 +480,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
               value={selectedCarType}
                onChange={(event) => void updateCarType(event.target.value as CarType)}
               disabled={isSaving}
-              className="mt-1 w-full max-w-[190px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="mt-1 w-full max-w-[190px] rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
               {vehicleTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -457,10 +490,11 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
             </select>
           </label>
           <Info label="Assigned Driver" value={getBookingDisplayAssignee(booking)} />
+          <Info label="Payment" value={getPaymentStatusLabel((booking.paymentStatus || 'UNPAID') as never)} />
         </div>
 
         {booking.specialInstructions ? (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-500">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             Note: {booking.specialInstructions}
           </div>
         ) : null}
@@ -479,7 +513,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
           </div>
         ) : null}
 
-        <div className="border-t border-zinc-800 pt-4">
+        <div className="border-t border-zinc-200 pt-4 dark:border-zinc-800">
           <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[minmax(0,220px)_auto] sm:items-center sm:justify-between">
             <label className="block max-w-[220px]">
               <span className="text-xs uppercase tracking-wide text-zinc-500">Fare</span>
@@ -495,7 +529,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
                     void saveFare();
                   }
                 }}
-                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
               />
             </label>
             <button
@@ -518,8 +552,8 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-1 text-sm text-zinc-200">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-zinc-800 dark:text-zinc-200">{value}</div>
     </div>
   );
 }

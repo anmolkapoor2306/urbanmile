@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
 import { BOOKING_STATUSES } from '@/lib/dispatch';
 import { bookingRecordSelect, createBookingReference, serializeBooking } from '@/lib/bookingRecord';
+import {
+  createBasePublicBookingId,
+  getOrCreateBookingCustomer,
+  normalizeCustomerPhone,
+} from '@/lib/publicBookingIds';
 import { z } from 'zod';
 import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 
@@ -37,9 +43,9 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const limit = parseInt(searchParams.get('limit') || '100');
 
-    const where = status && BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])
-      ? { status: status as (typeof BOOKING_STATUSES)[number], archivedAt: null }
-      : { archivedAt: null };
+    const where: Prisma.BookingWhereInput = status && BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])
+      ? { status: status as (typeof BOOKING_STATUSES)[number] }
+      : { status: { notIn: ['COMPLETED', 'CANCELLED'] } };
 
     const bookings = await prisma.booking.findMany({
       where,
@@ -102,33 +108,44 @@ export async function POST(request: NextRequest) {
       dropoffPlaceId,
       dropoffLocationSource,
     } = result.data;
-    const id = crypto.randomUUID();
     const pickupAt = new Date(pickupDateTime);
 
-    const booking = await prisma.booking.create({
-      data: {
-        id,
-        bookingReference: createBookingReference(id, pickupAt),
-        bookingType,
-        fullName,
-        email,
+    const booking = await prisma.$transaction(async (tx) => {
+      const id = crypto.randomUUID();
+      const customer = await getOrCreateBookingCustomer(tx, {
+        name: fullName,
         phone,
-        pickupLocation,
-        pickupLatitude: pickupLatitude ?? null,
-        pickupLongitude: pickupLongitude ?? null,
-        pickupPlaceId: pickupPlaceId || null,
-        pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-        dropoffLocation,
-        dropoffLatitude: dropoffLatitude ?? null,
-        dropoffLongitude: dropoffLongitude ?? null,
-        dropoffPlaceId: dropoffPlaceId || null,
-        dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-        pickupDateTime: pickupAt,
-        carType,
-        specialInstructions: specialInstructions || null,
-        status: 'NEW',
-      },
-      select: bookingRecordSelect,
+        email,
+      });
+
+      return tx.booking.create({
+        data: {
+          id,
+          publicBookingId: await createBasePublicBookingId(tx, pickupAt),
+          bookingReference: createBookingReference(id, pickupAt),
+          bookingType,
+          fullName,
+          email,
+          phone: normalizeCustomerPhone(phone),
+          customerId: customer.id,
+          pickupLocation,
+          pickupLatitude: pickupLatitude ?? null,
+          pickupLongitude: pickupLongitude ?? null,
+          pickupPlaceId: pickupPlaceId || null,
+          pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+          dropoffLocation,
+          dropoffLatitude: dropoffLatitude ?? null,
+          dropoffLongitude: dropoffLongitude ?? null,
+          dropoffPlaceId: dropoffPlaceId || null,
+          dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+          pickupDateTime: pickupAt,
+          carType,
+          specialInstructions: specialInstructions || null,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+        },
+        select: bookingRecordSelect,
+      });
     });
 
     return NextResponse.json(

@@ -4,9 +4,10 @@ import {
   createContext,
   useContext,
   useEffect,
-  useState,
+  useSyncExternalStore,
   ReactNode,
 } from 'react';
+import { usePathname } from 'next/navigation';
 
 type Theme = 'dark' | 'light';
 
@@ -20,23 +21,52 @@ const ThemeContext = createContext<ThemeContextValue>({
   toggleTheme: () => {},
 });
 
-const STORAGE_KEY = 'urbanmiles-theme';
+const PUBLIC_STORAGE_KEY = 'urbanmiles-theme';
+const ADMIN_STORAGE_KEY = 'urbanmiles-admin-theme';
+const THEME_STORAGE_EVENT = 'urbanmiles-theme-change';
+
+function isTheme(value: string | null): value is Theme {
+  return value === 'dark' || value === 'light';
+}
+
+function subscribeToTheme(onStoreChange: () => void) {
+  window.addEventListener('storage', onStoreChange);
+  window.addEventListener(THEME_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener('storage', onStoreChange);
+    window.removeEventListener(THEME_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function getThemeSnapshot(storageKey: string, defaultTheme: Theme) {
+  const storedTheme = window.localStorage.getItem(storageKey);
+  return isTheme(storedTheme) ? storedTheme : defaultTheme;
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('light');
+  const pathname = usePathname();
+  const isAdminRoute = pathname?.startsWith('/admin') ?? false;
+  const storageKey = isAdminRoute ? ADMIN_STORAGE_KEY : PUBLIC_STORAGE_KEY;
+  const defaultTheme: Theme = isAdminRoute ? 'dark' : 'light';
+  const theme = useSyncExternalStore(
+    subscribeToTheme,
+    () => getThemeSnapshot(storageKey, defaultTheme),
+    () => defaultTheme
+  );
 
-  // Apply 'dark' class to <html> when theme is set
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      // ignore
-    }
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem(storageKey, nextTheme);
+      window.dispatchEvent(new Event(THEME_STORAGE_EVENT));
+    } catch {
+      // ignore
+    }
   };
 
   return (

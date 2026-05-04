@@ -32,7 +32,6 @@ export const bookingRecordSelect = {
   startedAt: true,
   completedAt: true,
   cancelledAt: true,
-  archivedAt: true,
   cancelReason: true,
   fareAmount: true,
   commissionAmount: true,
@@ -75,6 +74,14 @@ export const bookingRecordSelect = {
       status: true,
     },
   },
+  customer: {
+    select: {
+      publicId: true,
+      name: true,
+      phone: true,
+      email: true,
+    },
+  },
 } satisfies Prisma.BookingSelect;
 
 export type BookingRecord = Prisma.BookingGetPayload<{
@@ -93,13 +100,33 @@ function serializeMoney(value: Prisma.Decimal | null): number | null {
 }
 
 export function serializeBooking(booking: BookingRecord) {
+  const optionalBooking = booking as BookingRecord & {
+    publicBookingId?: string | null;
+    roundTripGroupId?: string | null;
+    parentPublicBookingId?: string | null;
+    customer?: {
+      publicId: string;
+      name: string;
+      phone: string;
+      email: string | null;
+    } | null;
+  };
+
   return {
     id: booking.id,
-    bookingReference: booking.bookingReference,
+    publicBookingId: optionalBooking.publicBookingId ?? undefined,
+    bookingReference: optionalBooking.publicBookingId || booking.bookingReference,
+    internalBookingReference: booking.bookingReference,
+    roundTripGroupId: optionalBooking.roundTripGroupId ?? null,
+    parentPublicBookingId: optionalBooking.parentPublicBookingId ?? null,
     bookingType: booking.bookingType,
-    fullName: booking.fullName,
+    fullName: optionalBooking.customer?.name || booking.fullName,
     email: booking.email,
-    phone: booking.phone,
+    phone: optionalBooking.customer?.phone || booking.phone,
+    customerPublicId: optionalBooking.customer?.publicId ?? null,
+    customerName: optionalBooking.customer?.name ?? booking.fullName,
+    customerPhone: optionalBooking.customer?.phone ?? booking.phone,
+    customerEmail: optionalBooking.customer?.email ?? booking.email,
     pickupLocation: booking.pickupLocation,
     pickupLatitude: booking.pickupLatitude,
     pickupLongitude: booking.pickupLongitude,
@@ -125,7 +152,6 @@ export function serializeBooking(booking: BookingRecord) {
     startedAt: booking.startedAt?.toISOString() ?? null,
     completedAt: booking.completedAt?.toISOString() ?? null,
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
-    archivedAt: booking.archivedAt?.toISOString() ?? null,
     cancelReason: booking.cancelReason,
     fareAmount: serializeMoney(booking.fareAmount),
     commissionAmount: serializeMoney(booking.commissionAmount),

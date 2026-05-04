@@ -23,6 +23,14 @@ function isWithinDays(date: Date, days: number) {
   return date >= start;
 }
 
+function hasAssignedDriver(booking: SerializedBooking) {
+  return Boolean(booking.driverId);
+}
+
+function hasPickupInFuture(booking: SerializedBooking, now: Date) {
+  return new Date(booking.pickupDateTime).getTime() > now.getTime();
+}
+
 export function sumMoney(values: Array<number | null | undefined>): number {
   return values.reduce<number>((total, value) => total + (value ?? 0), 0);
 }
@@ -50,25 +58,40 @@ export function getBookingDisplayAssignee(booking: AssigneeBooking) {
 export function buildBookingMetrics(bookings: SerializedBooking[]) {
   const now = new Date();
   const completedToday = bookings.filter(
-    (booking) => booking.completedAt && isSameDay(new Date(booking.completedAt), now)
+    (booking) => booking.status === 'COMPLETED' && booking.completedAt && isSameDay(new Date(booking.completedAt), now)
   );
 
   const todaysBookings = bookings.filter((booking) => isSameDay(new Date(booking.createdAt), now));
   const unpaidBookings = bookings.filter((booking) => booking.paymentStatus !== 'PAID');
+  const needsAssignment = bookings.filter(
+    (booking) => booking.status === 'CONFIRMED' && !hasAssignedDriver(booking)
+  );
+  const assignedUpcoming = bookings.filter(
+    (booking) => booking.status === 'ASSIGNED' && hasPickupInFuture(booking, now)
+  );
   const activeTrips = bookings.filter((booking) => booking.status === 'ACTIVE');
+  const liveTrips = bookings.filter(
+    (booking) => (booking.status === 'ASSIGNED' || booking.status === 'ACTIVE') && hasAssignedDriver(booking)
+  );
+  const upcomingTrips = [...bookings]
+    .filter((booking) => !['COMPLETED', 'CANCELLED'].includes(booking.status) && hasPickupInFuture(booking, now))
+    .sort((a, b) => +new Date(a.pickupDateTime) - +new Date(b.pickupDateTime))
+    .slice(0, 5);
 
   return {
     total: bookings.length,
     new: bookings.filter((booking) => booking.status === 'NEW').length,
-    pendingConfirmation: bookings.filter((booking) => booking.status === 'NEW').length,
+    pendingConfirmation: needsAssignment.length,
+    needsAssignment: needsAssignment.length,
     confirmed: bookings.filter((booking) => booking.status === 'CONFIRMED').length,
-    assigned: bookings.filter((booking) => booking.status === 'ASSIGNED').length,
+    assigned: assignedUpcoming.length,
+    assignedUpcoming: assignedUpcoming.length,
     inProgress: bookings.filter((booking) => booking.status === 'ACTIVE').length,
     completed: bookings.filter((booking) => booking.status === 'COMPLETED').length,
     completedToday: completedToday.length,
     cancelled: bookings.filter((booking) => booking.status === 'CANCELLED').length,
     activeTripsCount: activeTrips.length,
-    revenueToday: sumMoney(todaysBookings.map((booking) => booking.fareAmount)),
+    revenueToday: sumMoney(completedToday.map((booking) => booking.fareAmount)),
     commissionToday: sumMoney(todaysBookings.map((booking) => booking.commissionAmount)),
     netEarningsToday: sumMoney(todaysBookings.map((booking) => booking.netEarningAmount ?? booking.commissionAmount)),
     unpaidAmount: sumMoney(unpaidBookings.map((booking) => booking.fareAmount)),
@@ -79,11 +102,11 @@ export function buildBookingMetrics(bookings: SerializedBooking[]) {
       bookings.filter((booking) => isWithinDays(new Date(booking.createdAt), 30)).map((booking) => booking.fareAmount)
     ),
     driverPayoutToday: sumMoney(todaysBookings.map((booking) => booking.payoutAmount ?? booking.driverEarning)),
-    confirmedWaitingForAssignment: bookings.filter(
-      (booking) => booking.status === 'CONFIRMED' && !booking.driverId && !booking.manualDriverName && !booking.vendorId
-    ),
-    pendingConfirmationQueue: bookings.filter((booking) => booking.status === 'NEW'),
+    confirmedWaitingForAssignment: needsAssignment,
+    pendingConfirmationQueue: needsAssignment,
     activeTrips,
+    liveTrips,
+    upcomingTrips,
     recentBookings: [...bookings]
       .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
       .slice(0, 8),
@@ -97,6 +120,10 @@ export function buildDispatchMetrics(bookings: SerializedBooking[], drivers: Ser
     totalDrivers: drivers.length,
     availableDrivers: drivers.filter((driver) => driver.isActive && driver.availabilityStatus === 'AVAILABLE').length,
     busyDrivers: drivers.filter((driver) => driver.availabilityStatus === 'BUSY').length,
+    offDutyDrivers: drivers.filter((driver) => !driver.isActive || driver.availabilityStatus === 'OFFLINE').length,
+    vendorAvailableDrivers: drivers.filter(
+      (driver) => driver.isActive && driver.driverType === 'VENDOR' && driver.availabilityStatus === 'AVAILABLE'
+    ).length,
     confirmedWaitingForDispatch: metrics.confirmedWaitingForAssignment.length,
     activeTrips: metrics.activeTripsCount,
     completedToday: metrics.completedToday,

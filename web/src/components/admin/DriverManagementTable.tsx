@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
 import { cn, toTitleCase } from '@/lib/utils';
@@ -24,10 +25,11 @@ const emptyForm: DriverFormState = {
   notes: '',
 };
 
-export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[] }) {
+export function DriverManagementTable({ drivers, bookings = [] }: { drivers: SerializedDriver[]; bookings?: SerializedBooking[] }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AVAILABLE' | 'ASSIGNED' | 'ON_TRIP' | 'OFF_DUTY'>('ALL');
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [editingDriver, setEditingDriver] = useState<DriverFormState | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -37,13 +39,17 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
     const query = search.toLowerCase();
     return drivers.filter((driver) => {
       const matchesType = typeFilter === 'ALL' || driver.driverType === typeFilter;
+      const visualStatus = getDriverVisualStatus(driver, bookings);
+      const matchesStatus = statusFilter === 'ALL' || visualStatus === statusFilter;
       const matchesSearch =
         driver.name.toLowerCase().includes(query) ||
-        driver.phone.includes(search);
+        driver.phone.includes(search) ||
+        (driver.email || '').toLowerCase().includes(query) ||
+        (driver.driverCode || '').toLowerCase().includes(query);
 
-      return matchesType && matchesSearch;
+      return matchesType && matchesStatus && matchesSearch;
     });
-  }, [drivers, search, typeFilter]);
+  }, [bookings, drivers, search, statusFilter, typeFilter]);
 
   const selectedDriver = useMemo(
     () => (selectedDriverId ? drivers.find((driver) => driver.id === selectedDriverId) ?? null : null),
@@ -177,7 +183,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
 
     if (action === 'toggle-availability') {
       await updateDriver(driver.id, {
-        availabilityStatus: getDriverVisualStatus(driver) === 'AVAILABLE' ? 'BUSY' : 'AVAILABLE',
+        availabilityStatus: getDriverVisualStatus(driver, bookings) === 'AVAILABLE' ? 'OFFLINE' : 'AVAILABLE',
       });
       return;
     }
@@ -187,25 +193,36 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col gap-5 overflow-hidden">
-      <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/80 px-5 py-4 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white px-5 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <input
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by driver, phone, company, or vehicle"
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500 md:min-w-[24rem]"
+              placeholder="Search by driver, phone, email, or code"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:min-w-[24rem]"
             />
             <select
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value as 'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR')}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500 md:w-56"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-56"
             >
               <option value="ALL">All Driver Types</option>
               <option value="OWN">Own Driver</option>
               <option value="THIRD_PARTY">Third Party Driver</option>
               <option value="VENDOR">Vendor / Company</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-48"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="AVAILABLE">Available</option>
+              <option value="ASSIGNED">Assigned</option>
+              <option value="ON_TRIP">On Trip</option>
+              <option value="OFF_DUTY">Off Duty</option>
             </select>
           </div>
 
@@ -220,7 +237,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
       </section>
 
       <div className="grid w-full flex-1 min-h-0 min-w-0 grid-cols-1 gap-6 lg:grid-cols-[2fr_1.2fr]">
-        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/80 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex h-full min-h-0 flex-col p-5">
             <div className="mb-4 flex shrink-0 items-start justify-between gap-4">
               <div>
@@ -236,7 +253,8 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
               {filteredDrivers.length > 0 ? (
                 filteredDrivers.map((driver) => {
                   const isSelected = selectedDriverId === driver.id;
-                  const visualStatus = getDriverVisualStatus(driver);
+                  const visualStatus = getDriverVisualStatus(driver, bookings);
+                  const nextBooking = getNextDriverBooking(bookings, driver.id);
 
                   return (
                     <div
@@ -261,8 +279,11 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="truncate text-sm font-semibold text-zinc-100">{toTitleCase(driver.name)}</div>
                           <div className="truncate text-sm text-zinc-400">{driver.phone} • {driver.email || 'No email'}</div>
-                          <div className="truncate text-xs font-medium text-zinc-500">
+                          <div className="truncate text-xs font-medium text-zinc-500 dark:text-zinc-400">
                             {getDriverTypeLabel(driver.driverType as never)} • {getDriverCodeValue(driver)}
+                          </div>
+                          <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                            Next: {nextBooking ? formatDateTime(nextBooking.pickupDateTime) : 'No upcoming booking'}
                           </div>
                         </div>
 
@@ -323,7 +344,7 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
           </div>
         </section>
 
-        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/80 shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+        <section className="min-h-0 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex h-full min-h-0 flex-col p-5">
             <div className="mb-4 shrink-0">
               <h3 className="text-base font-semibold text-zinc-100">Driver Details</h3>
@@ -451,8 +472,8 @@ export function DriverManagementTable({ drivers }: { drivers: SerializedDriver[]
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">{label}</div>
-      <div className="mt-1 text-sm text-zinc-200">{value}</div>
+      <div className="text-xs uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-1 text-sm text-zinc-800 dark:text-zinc-200">{value}</div>
     </div>
   );
 }
@@ -476,7 +497,7 @@ function DriverAvatar({ driver, size = 'md' }: { driver: SerializedDriver; size?
           size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5',
           visualStatus === 'AVAILABLE'
             ? 'bg-emerald-500'
-            : visualStatus === 'BUSY'
+            : visualStatus === 'ASSIGNED' || visualStatus === 'ON_TRIP'
               ? 'bg-amber-500'
               : 'bg-zinc-500'
         )}
@@ -559,16 +580,44 @@ function getDriverInitials(name: string) {
 }
 
 
-function getDriverVisualStatus(driver: SerializedDriver) {
+function getDriverVisualStatus(driver: SerializedDriver, bookings: SerializedBooking[] = []) {
   if (!driver.isActive) {
-    return 'OFFLINE';
+    return 'OFF_DUTY';
   }
 
-  return driver.availabilityStatus || 'OFFLINE';
+  if (bookings.some((booking) => booking.driverId === driver.id && booking.status === 'ACTIVE')) {
+    return 'ON_TRIP';
+  }
+
+  if (bookings.some((booking) => booking.driverId === driver.id && booking.status === 'ASSIGNED')) {
+    return 'ASSIGNED';
+  }
+
+  if (driver.availabilityStatus === 'AVAILABLE') {
+    return 'AVAILABLE';
+  }
+
+  return 'OFF_DUTY';
 }
 
 function getDriverCodeValue(driver: SerializedDriver) {
   return driver.driverCode || 'DRV-0000';
+}
+
+function getNextDriverBooking(bookings: SerializedBooking[], driverId: string) {
+  const now = Date.now();
+  return [...bookings]
+    .filter((booking) => booking.driverId === driverId && ['ASSIGNED', 'ACTIVE'].includes(booking.status) && new Date(booking.pickupDateTime).getTime() >= now)
+    .sort((a, b) => +new Date(a.pickupDateTime) - +new Date(b.pickupDateTime))[0] ?? null;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

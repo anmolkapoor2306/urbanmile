@@ -1,8 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Location from 'expo-location';
+import { useRouter } from 'expo-router';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
+import { createQuickBooking } from '@/lib/api';
 
 const PHONE_HREF = 'tel:+918146606635';
+const heroCarImage = require('@/assets/images/urbanmiles-hero-car.png');
+const quickDestinations = ['Amritsar', 'Chandigarh', 'Delhi Airport'];
 
 export default function HomeScreen() {
   return (
@@ -60,30 +66,106 @@ function Hero() {
         </Text>
       </View>
 
-      <CityIllustration />
-    </View>
-  );
-}
-
-function CityIllustration() {
-  return (
-    <View style={styles.illustration} pointerEvents="none">
-      <View style={[styles.building, styles.buildingOne]} />
-      <View style={[styles.building, styles.buildingTwo]} />
-      <View style={[styles.building, styles.buildingThree]} />
-      <View style={styles.roadLine} />
-      <View style={styles.carBody}>
-        <View style={styles.carTop} />
-        <View style={[styles.wheel, styles.wheelLeft]} />
-        <View style={[styles.wheel, styles.wheelRight]} />
+      <View style={styles.heroImageFrame}>
+        <Image source={heroCarImage} style={styles.heroImage} resizeMode="cover" />
       </View>
     </View>
   );
 }
 
 function BookingCard() {
+  const router = useRouter();
+  const [pickupLocation, setPickupLocation] = useState('Jalandhar');
+  const [dropoffLocation, setDropoffLocation] = useState('');
+  const [phone, setPhone] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleQuickBook = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
+    const phoneDigits = phone.replace(/\D/g, '');
+
+    if (!pickupLocation.trim()) {
+      setError('Enter pickup location');
+      return;
+    }
+
+    if (!dropoffLocation.trim()) {
+      setError('Enter dropoff location');
+      return;
+    }
+
+    if (phoneDigits.length < 10) {
+      setError('Enter a valid phone number');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      const result = await createQuickBooking({
+        pickupLocation: pickupLocation.trim(),
+        dropoffLocation: dropoffLocation.trim(),
+        phone: phoneDigits,
+      });
+
+      if (!result.success || !result.data?.bookingReference) {
+        throw new Error(result.error || 'Could not create booking');
+      }
+
+      router.push({
+        pathname: '/confirmation',
+        params: { reference: result.data.bookingReference },
+      });
+    } catch {
+      setError('Could not book right now. Call support or try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (isLocating) {
+      return;
+    }
+
+    setIsLocating(true);
+    setError('');
+
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+
+      if (permission.status !== 'granted') {
+        setError('Location permission was denied');
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const latitude = position.coords.latitude.toFixed(5);
+      const longitude = position.coords.longitude.toFixed(5);
+
+      setPickupLocation(`Current Location (${latitude}, ${longitude})`);
+    } catch {
+      setError('Could not get current location');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
   return (
     <View style={styles.bookingCard}>
+      <View style={styles.quickHeader}>
+        <Text style={styles.quickTitle}>Quick booking</Text>
+        <Text style={styles.quickMeta}>Pickup now · Sedan</Text>
+      </View>
+
       <View style={styles.segmentedControl}>
         <Pressable style={[styles.segment, styles.segmentActive]}>
           <Text style={[styles.segmentText, styles.segmentTextActive]}>One Way</Text>
@@ -102,18 +184,79 @@ function BookingCard() {
       </Pressable>
 
       <View style={styles.locationGroup}>
-        <LocationInput iconColor="#111111" value="Jalandhar" />
+        <LocationInput
+          iconColor="#111111"
+          value={pickupLocation}
+          onChangeText={(value) => {
+            setPickupLocation(value);
+            setError('');
+          }}
+          returnKeyType="next"
+        />
         <View style={styles.locationConnector} />
-        <LocationInput iconColor="#F0B429" placeholder="Dropoff location" />
+        <LocationInput
+          iconColor="#F0B429"
+          placeholder="Dropoff location"
+          value={dropoffLocation}
+          onChangeText={(value) => {
+            setDropoffLocation(value);
+            setError('');
+          }}
+          returnKeyType="next"
+        />
       </View>
 
-      <Pressable style={styles.currentLocationButton}>
+      <View style={styles.destinationChips}>
+        {quickDestinations.map((city) => (
+          <Pressable
+            key={city}
+            style={({ pressed }) => [styles.destinationChip, pressed && styles.pressed]}
+            onPress={() => {
+              setDropoffLocation(city);
+              setError('');
+            }}>
+            <Text style={styles.destinationChipText}>{city}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.phoneInputWrap}>
+        <Ionicons name="call-outline" size={17} color="#6B645A" />
+        <TextInput
+          value={phone}
+          onChangeText={(value) => {
+            setPhone(value);
+            setError('');
+          }}
+          placeholder="Phone number"
+          placeholderTextColor="#A29A90"
+          keyboardType="phone-pad"
+          returnKeyType="done"
+          style={styles.phoneInput}
+        />
+      </View>
+
+      <Pressable
+        style={styles.currentLocationButton}
+        onPress={handleUseCurrentLocation}
+        disabled={isLocating}>
         <Ionicons name="locate-outline" size={15} color="#6B645A" />
-        <Text style={styles.currentLocationText}>Use current location</Text>
+        <Text style={styles.currentLocationText}>
+          {isLocating ? 'Getting current location...' : 'Use current location'}
+        </Text>
       </Pressable>
 
-      <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-        <Text style={styles.primaryButtonText}>See Prices</Text>
+      {error ? <Text style={styles.inlineError}>{error}</Text> : null}
+
+      <Pressable
+        onPress={handleQuickBook}
+        disabled={isSubmitting}
+        style={({ pressed }) => [
+          styles.primaryButton,
+          pressed && styles.pressed,
+          isSubmitting && styles.disabledButton,
+        ]}>
+        <Text style={styles.primaryButtonText}>{isSubmitting ? 'Booking...' : 'Book Now'}</Text>
       </Pressable>
     </View>
   );
@@ -123,19 +266,24 @@ function LocationInput({
   iconColor,
   placeholder,
   value,
+  onChangeText,
+  returnKeyType,
 }: {
   iconColor: string;
   placeholder?: string;
   value?: string;
+  onChangeText?: (value: string) => void;
+  returnKeyType?: 'done' | 'go' | 'next' | 'search' | 'send';
 }) {
   return (
     <View style={styles.locationInput}>
       <View style={[styles.locationDot, { backgroundColor: iconColor }]} />
       <TextInput
         value={value}
+        onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor="#A29A90"
-        editable={false}
+        returnKeyType={returnKeyType}
         style={styles.locationTextInput}
       />
     </View>
@@ -245,9 +393,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   hero: {
-    minHeight: 284,
     paddingTop: 18,
-    paddingBottom: 64,
+    paddingBottom: 42,
   },
   statusBadge: {
     alignSelf: 'flex-start',
@@ -273,7 +420,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   heroCopy: {
-    width: '90%',
     paddingTop: 24,
   },
   heroTitle: {
@@ -291,81 +437,25 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontWeight: '500',
   },
-  illustration: {
-    position: 'absolute',
-    right: -12,
-    bottom: 18,
-    width: 210,
-    height: 132,
-    opacity: 0.38,
+  heroImageFrame: {
+    width: '100%',
+    height: 260,
+    marginTop: 24,
+    overflow: 'hidden',
+    borderRadius: 30,
+    backgroundColor: '#EFE5D8',
+    shadowColor: '#251B10',
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 7,
   },
-  building: {
-    position: 'absolute',
-    bottom: 45,
-    borderRadius: 6,
-    backgroundColor: '#E4D8C8',
-  },
-  buildingOne: {
-    right: 140,
-    width: 28,
-    height: 76,
-  },
-  buildingTwo: {
-    right: 96,
-    width: 34,
-    height: 96,
-  },
-  buildingThree: {
-    right: 52,
-    width: 30,
-    height: 66,
-  },
-  roadLine: {
-    position: 'absolute',
-    right: 18,
-    bottom: 28,
-    width: 164,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: '#D3C7B8',
-  },
-  carBody: {
-    position: 'absolute',
-    right: 18,
-    bottom: 34,
-    width: 116,
-    height: 34,
-    borderRadius: 18,
-    backgroundColor: '#111111',
-  },
-  carTop: {
-    position: 'absolute',
-    left: 32,
-    top: -18,
-    width: 48,
-    height: 24,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    backgroundColor: '#F2C94C',
-  },
-  wheel: {
-    position: 'absolute',
-    bottom: -7,
-    width: 17,
-    height: 17,
-    borderRadius: 9,
-    backgroundColor: '#111111',
-    borderWidth: 3,
-    borderColor: '#F8F3EA',
-  },
-  wheelLeft: {
-    left: 20,
-  },
-  wheelRight: {
-    right: 20,
+  heroImage: {
+    width: '100%',
+    height: '100%',
   },
   bookingCard: {
-    marginTop: -34,
+    marginTop: -22,
     borderRadius: 30,
     backgroundColor: '#FFFDF8',
     padding: 18,
@@ -374,6 +464,20 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 18 },
     elevation: 9,
+  },
+  quickHeader: {
+    marginBottom: 14,
+  },
+  quickTitle: {
+    color: '#111111',
+    fontSize: 21,
+    fontWeight: '900',
+  },
+  quickMeta: {
+    marginTop: 4,
+    color: '#766E63',
+    fontSize: 13,
+    fontWeight: '700',
   },
   segmentedControl: {
     flexDirection: 'row',
@@ -465,6 +569,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingVertical: 0,
   },
+  destinationChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  destinationChip: {
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    backgroundColor: '#FFF7D7',
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#F2E1A3',
+  },
+  destinationChipText: {
+    color: '#5D5142',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  phoneInputWrap: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+    borderRadius: 22,
+    backgroundColor: '#F8F3EA',
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#EDE2D4',
+  },
+  phoneInput: {
+    flex: 1,
+    minHeight: 44,
+    color: '#111111',
+    fontSize: 16,
+    fontWeight: '700',
+    paddingVertical: 0,
+  },
   currentLocationButton: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -478,6 +623,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  inlineError: {
+    marginBottom: 10,
+    color: '#B42318',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   primaryButton: {
     minHeight: 56,
     alignItems: 'center',
@@ -489,6 +640,9 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 10 },
     elevation: 4,
+  },
+  disabledButton: {
+    opacity: 0.72,
   },
   primaryButtonText: {
     color: '#FFFFFF',

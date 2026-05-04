@@ -7,13 +7,11 @@ import { BOOKING_STATUSES } from '@/lib/dispatch'
 export default function StatusButtons({ bookingId, currentStatus, onStatusChange }: { bookingId: string, currentStatus: BookingStatusValue, onStatusChange?: (status: BookingStatusValue) => void }) {
   const [selected, setSelected] = useState(currentStatus)
   const [saving, setSaving] = useState(false)
-  const [previousStatus, setPreviousStatus] = useState<BookingStatusValue | null>(null)
+  void bookingId
 
   const STATUSES = BOOKING_STATUSES
 
   function updateStatus(newStatus: BookingStatusValue) {
-    const oldStatus = selected
-    setPreviousStatus(oldStatus)
     setSelected(newStatus)
     setSaving(true)
 

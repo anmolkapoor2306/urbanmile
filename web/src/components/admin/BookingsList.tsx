@@ -9,7 +9,7 @@ import type { SerializedBooking } from '@/lib/bookingRecord'
 import type { BookingStatusValue } from '@/lib/dispatch'
 
 export default function BookingsList({ initialBookings }: { initialBookings: SerializedBooking[] }) {
-  const [bookings, setBookings] = useState(initialBookings)
+  const [bookings] = useState(initialBookings)
   const [fadingIds, setFadingIds] = useState(new Set<string>())
   const [hiddenIds, setHiddenIds] = useState(new Set<string>())
 
@@ -41,8 +41,16 @@ export default function BookingsList({ initialBookings }: { initialBookings: Ser
               <div className="flex flex-col gap-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{booking.fullName}</div>
-                    <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{booking.phone}</div>
+                    <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{booking.customerName || booking.fullName}</div>
+                    <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{booking.customerPhone || booking.phone}</div>
+                    {booking.customerEmail && (
+                      <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{booking.customerEmail}</div>
+                    )}
+                    {booking.customerPublicId && (
+                      <div className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                        Customer {booking.customerPublicId}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex-1 flex justify-center items-start">
@@ -54,7 +62,7 @@ export default function BookingsList({ initialBookings }: { initialBookings: Ser
                   </div>
 
                   <div className="flex-1 flex flex-col items-end">
-                    <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{booking.bookingReference}</div>
+                    <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{booking.publicBookingId || booking.bookingReference}</div>
                     <div className="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                       {formatDate(new Date(booking.pickupDateTime))}
                     </div>
@@ -116,5 +124,3 @@ export default function BookingsList({ initialBookings }: { initialBookings: Ser
       </div>
     )
 }
-
-

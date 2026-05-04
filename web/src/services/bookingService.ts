@@ -1,27 +1,43 @@
 import prisma from '@/lib/prisma';
 import { bookingRecordSelect, createBookingReference } from '@/lib/bookingRecord';
+import {
+  createBasePublicBookingId,
+  getOrCreateBookingCustomer,
+  normalizeCustomerPhone,
+} from '@/lib/publicBookingIds';
 import { CreateBookingInput, UpdateBookingStatusInput } from '@/types';
 
 export const createBooking = async (input: CreateBookingInput) => {
   try {
-    const id = crypto.randomUUID();
-    const booking = await prisma.booking.create({
-      data: {
-        id,
-        bookingReference: createBookingReference(id, input.pickupDateTime),
-        bookingType: input.bookingType,
-        fullName: input.fullName,
-        email: input.email,
+    const booking = await prisma.$transaction(async (tx) => {
+      const id = crypto.randomUUID();
+      const customer = await getOrCreateBookingCustomer(tx, {
+        name: input.fullName,
         phone: input.phone,
-        pickupLocation: input.pickupLocation,
-        dropoffLocation: input.dropoffLocation,
-        pickupDateTime: input.pickupDateTime,
-        carType: input.carType,
-        fareAmount: input.fareAmount ?? null,
-        specialInstructions: input.specialInstructions ?? null,
-        status: 'NEW',
-      },
-      select: bookingRecordSelect,
+        email: input.email,
+      });
+
+      return tx.booking.create({
+        data: {
+          id,
+          publicBookingId: await createBasePublicBookingId(tx, input.pickupDateTime),
+          bookingReference: createBookingReference(id, input.pickupDateTime),
+          bookingType: input.bookingType,
+          fullName: input.fullName,
+          email: input.email,
+          phone: normalizeCustomerPhone(input.phone),
+          customerId: customer.id,
+          pickupLocation: input.pickupLocation,
+          dropoffLocation: input.dropoffLocation,
+          pickupDateTime: input.pickupDateTime,
+          carType: input.carType,
+          fareAmount: input.fareAmount ?? null,
+          specialInstructions: input.specialInstructions ?? null,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+        },
+        select: bookingRecordSelect,
+      });
     });
     return { success: true, data: booking };
   } catch (error) {
@@ -38,7 +54,7 @@ export const getBookings = async (status?: 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'A
       select: bookingRecordSelect,
       take: limit,
       orderBy: { createdAt: 'desc' },
-      where: status ? { status, archivedAt: null } : { archivedAt: null },
+      where: status ? { status } : { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
     });
     return { success: true, data: bookings };
   } catch (error) {
