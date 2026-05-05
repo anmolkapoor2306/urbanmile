@@ -18,11 +18,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-      <html
-        lang="en"
-        className="h-full antialiased"
-      >
-      <body className="min-h-full flex flex-col overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"><ThemeProvider>{children}</ThemeProvider></body>
+    <html
+      lang="en"
+      className="dark h-full antialiased"
+      suppressHydrationWarning
+    >
+    <body className="min-h-full flex flex-col overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+      <script dangerouslySetInnerHTML={{
+        __html: `
+          (function(){
+            try{
+              var stored = localStorage.getItem('urbanmiles-theme');
+              if(stored === 'light'){
+                document.documentElement.classList.remove('dark');
+              }
+            } catch(e){}
+          })();
+        `,
+      }} />
+      <ThemeProvider>{children}</ThemeProvider>
+    </body>
     </html>
   );
 }

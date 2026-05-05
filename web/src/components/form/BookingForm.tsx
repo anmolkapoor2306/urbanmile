@@ -1485,7 +1485,7 @@ function BookingField({
           'flex min-h-13 items-center gap-4 rounded-[20px] border bg-zinc-50 px-5 transition-colors',
           'border-zinc-200 focus-within:border-zinc-950 focus-within:bg-white focus-within:ring-4 focus-within:ring-zinc-950/5',
           'dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-amber-300 dark:focus-within:bg-zinc-950 dark:focus-within:ring-amber-300/10',
-          error && 'border-red-300 focus-within:border-red-500 focus-within:ring-red-500/10'
+          error && 'border-red-500 focus-within:border-red-500 focus-within:ring-red-500/10'
         )}
       >
         {icon && (
@@ -1505,9 +1505,11 @@ function BookingField({
           aria-invalid={!!error}
           aria-autocomplete={suggestions.length > 0 ? 'list' : undefined}
           aria-expanded={suggestions.length > 0 ? true : undefined}
+          placeholder={error || props.placeholder}
           className={cn(
             'min-h-11 w-full min-w-0 bg-transparent text-base font-medium text-zinc-950 outline-none placeholder:text-zinc-400',
             'dark:text-white dark:placeholder:text-zinc-500',
+            error && 'placeholder:text-red-500 dark:placeholder:text-red-400',
             showLocationIcon && 'pr-10',
             className
           )}
@@ -1558,7 +1560,6 @@ function BookingField({
           ))}
         </div>
       )}
-      {error && <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }

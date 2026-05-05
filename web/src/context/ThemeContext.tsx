@@ -17,7 +17,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'light',
+  theme: 'dark',
   toggleTheme: () => {},
 });
 
@@ -48,7 +48,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isAdminRoute = pathname?.startsWith('/admin') ?? false;
   const storageKey = isAdminRoute ? ADMIN_STORAGE_KEY : PUBLIC_STORAGE_KEY;
-  const defaultTheme: Theme = isAdminRoute ? 'dark' : 'light';
+  const defaultTheme: Theme = 'dark';
   const theme = useSyncExternalStore(
     subscribeToTheme,
     () => getThemeSnapshot(storageKey, defaultTheme),

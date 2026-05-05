@@ -60,7 +60,7 @@ export function FindBookingFormModal({ isOpen, onClose }: { isOpen: boolean; onC
       const response = await fetch('/api/bookings/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, bookingId }),
+        body: JSON.stringify({ phone, bookingId: bookingId.toUpperCase() }),
       });
       const data = await response.json();
 
@@ -109,13 +109,13 @@ export function FindBookingFormModal({ isOpen, onClose }: { isOpen: boolean; onC
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
             placeholder="Phone number"
-            className="min-h-12 w-full rounded-[18px] border border-zinc-200 bg-zinc-50 px-4 text-sm font-semibold text-zinc-950 outline-none focus:border-zinc-950 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:focus:border-amber-300"
+            className="min-h-12 w-full rounded-[18px] border border-zinc-200 bg-zinc-50 px-4 text-sm font-semibold text-zinc-950 transition-all duration-200 outline-none focus:border-zinc-950 focus:bg-white focus:outline-none focus:ring-2 focus:ring-zinc-950/20 dark:border-zinc-700 dark:bg-neutral-900 dark:text-white dark:focus:border-amber-300 dark:focus:bg-neutral-900 dark:focus:outline-none dark:focus:ring-2 dark:focus:ring-amber-500"
           />
           <input
             value={bookingId}
-            onChange={(event) => setBookingId(event.target.value.toUpperCase())}
+            onChange={(event) => setBookingId(event.target.value)}
             placeholder="Booking ID"
-            className="min-h-12 w-full rounded-[18px] border border-zinc-200 bg-zinc-50 px-4 text-sm font-semibold uppercase text-zinc-950 outline-none focus:border-zinc-950 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:focus:border-amber-300"
+            className="min-h-12 w-full rounded-[18px] border border-zinc-200 bg-zinc-50 px-4 text-sm font-semibold text-zinc-950 placeholder:text-zinc-400 transition-all duration-200 outline-none focus:border-zinc-950 focus:bg-white focus:outline-none focus:ring-2 focus:ring-zinc-950/20 dark:border-zinc-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-zinc-400 dark:focus:border-amber-300 dark:focus:bg-neutral-900 dark:focus:outline-none dark:focus:ring-2 dark:focus:ring-amber-500"
           />
           <button
             type="submit"
