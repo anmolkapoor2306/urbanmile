@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, FormEvent, useEffect, useRef } from 'react';
-import { CalendarClock, ChevronDown, Navigation, ShieldCheck, X } from 'lucide-react';
+import { CalendarClock, ChevronDown, Loader2, Navigation, ShieldCheck, X } from 'lucide-react';
 import { z } from 'zod';
 import { cn } from '@/lib/utils';
 import { CONTACT_PHONE_HREF } from '@/lib/contact';
@@ -134,6 +134,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLocatingPickup, setIsLocatingPickup] = useState(false);
   const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
+  const [showDateTimeModal, setShowDateTimeModal] = useState(false);
 
   const finalPrice = priceQuote ? priceQuote.sedanPrice + (selectedRide === 'SUV' ? 1000 : 0) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
@@ -155,7 +156,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     const { name, value } = e.target;
     setBookingError(null);
 
-    if (name === 'pickupLocation') {
+    if (name === 'pickup_location_field') {
       pickupField.updateAddress(value);
       setPickupLocationError(null);
       setRouteMessage(null);
@@ -168,7 +169,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
         pickupPlaceId: '',
         pickupLocationSource: 'manual',
       }));
-    } else if (name === 'dropoffLocation') {
+    } else if (name === 'dropoff_location_field') {
       dropoffField.updateAddress(value);
       setRouteMessage(null);
       setPriceQuote(null);
@@ -195,18 +196,23 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     }
 
     const errorName =
-      name === 'pickupDate' || name === 'pickupTime'
-        ? 'pickupDateTime'
-        : name === 'returnDate' || name === 'returnTime'
-          ? 'returnDateTime'
-          : name;
+      name === 'pickup_location_field'
+        ? 'pickupLocation'
+        : name === 'dropoff_location_field'
+          ? 'dropoffLocation'
+          : name === 'pickupDate' || name === 'pickupTime'
+            ? 'pickupDateTime'
+            : name === 'returnDate' || name === 'returnTime'
+              ? 'returnDateTime'
+              : name;
 
     if (errors[errorName as BookingErrorField]) {
       setErrors((prev) => ({ ...prev, [errorName]: undefined }));
     }
 
-    if (name === 'pickupLocation' || name === 'dropoffLocation') {
-      setActiveLocationField(name);
+    if (name === 'pickup_location_field' || name === 'dropoff_location_field') {
+      const fieldName = name === 'pickup_location_field' ? 'pickupLocation' : 'dropoffLocation';
+      setActiveLocationField(fieldName);
       setHighlightedSuggestionIndex(0);
     }
   };
@@ -468,10 +474,10 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       setRouteMessage(null);
       setPriceQuote(null);
     } catch (error) {
-      let errorMessage = 'Unable to get your current location right now. Please enter pickup manually.';
+      let errorMessage = 'Unable to fetch location';
       if (error instanceof GeolocationPositionError) {
         if (error.code === error.PERMISSION_DENIED) {
-          errorMessage = 'Location permission was denied. Please enter pickup manually.';
+          errorMessage = 'Location access denied';
         }
       }
 
@@ -608,6 +614,32 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     }
   };
 
+  async function verifyOtpForBooking() {
+    if (!otpPhone.trim() || !otpCode.trim()) {
+      setAuthError('Enter your 6-digit code.');
+      return false;
+    }
+
+    const response = await fetch('/api/auth/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: otpPhone, code: otpCode }),
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.verificationToken) {
+      setAuthError(data.error || 'Phone verification failed. Please try again.');
+      return false;
+    }
+
+    setPhoneVerificationToken(data.verificationToken);
+    setPhoneVerified(true);
+    setVerifiedPhone(data.bookingPhone || data.phone || otpPhone);
+    setFormData((prev) => ({ ...prev, phone: data.bookingPhone || data.phone || otpPhone }));
+    setAuthStep('ready');
+    return true;
+  }
+
   const handleProfileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
     setCustomerProfile((prev) => ({ ...prev, [name]: value }));
@@ -641,25 +673,12 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     setErrors({});
     setRouteMessage(null);
 
-    const pickupDateTime =
-      pickupTiming === 'NOW' ? new Date().toISOString() : formData.pickupDateTime;
-
     const routeErrors: Partial<Record<BookingErrorField, string>> = {};
     if (!formData.pickupLocation.trim()) {
       routeErrors.pickupLocation = 'Please enter pickup location';
     }
     if (!formData.dropoffLocation.trim()) {
       routeErrors.dropoffLocation = 'Please enter drop location';
-    }
-    if (pickupTiming === 'LATER' && !pickupDateTime) {
-      routeErrors.pickupDateTime = 'Please select pickup date and time';
-    }
-
-    const returnDateTimeError =
-      bookingMode === 'ROUND_TRIP' ? validateReturnDateTime(pickupDateTime, returnDateTime) : null;
-
-    if (returnDateTimeError) {
-      routeErrors.returnDateTime = returnDateTimeError;
     }
 
     if (Object.keys(routeErrors).length > 0) {
@@ -675,13 +694,51 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       return;
     }
 
+    if (pickupTiming === 'LATER' || bookingMode === 'ROUND_TRIP') {
+      setShowDateTimeModal(true);
+      return;
+    }
+
     setSelectedRide('SEDAN');
     setPriceQuote(fixedRoutePrice);
     setFormData((prev) => ({
       ...prev,
-      pickupDateTime,
+      pickupDateTime: new Date().toISOString(),
       carType: 'SEDAN',
       fareAmount: fixedRoutePrice.sedanPrice,
+    }));
+  };
+
+  const handleConfirmDateTime = () => {
+    const pickupDateTime =
+      pickupTiming === 'NOW' ? new Date().toISOString() : buildPickupDateTime(pickupDate, pickupTime);
+
+    const validationErrors: Partial<Record<BookingErrorField, string>> = {};
+
+    if (pickupTiming === 'LATER' && !pickupDateTime) {
+      validationErrors.pickupDateTime = 'Please select pickup date and time';
+    }
+
+    if (bookingMode === 'ROUND_TRIP') {
+      const returnDateTimeErr = validateReturnDateTime(pickupDateTime, returnDateTime);
+      if (returnDateTimeErr) {
+        validationErrors.returnDateTime = returnDateTimeErr;
+      }
+    }
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    setShowDateTimeModal(false);
+    setSelectedRide('SEDAN');
+    setPriceQuote(getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation) || null);
+    setFormData((prev) => ({
+      ...prev,
+      pickupDateTime,
+      carType: 'SEDAN',
+      fareAmount: (getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation) || {}).sedanPrice,
     }));
   };
 
@@ -693,9 +750,29 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     setIsSubmitting(true);
     setErrors({});
     setBookingError(null);
+    setAuthError(null);
+
+    if (authStep !== 'otp' || !customerProfile.fullName.trim()) {
+      setBookingError('Verify your phone before booking.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!phoneVerified) {
+      if (!otpSent) {
+        setBookingError('Please verify phone number');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const verified = await verifyOtpForBooking();
+      if (!verified) {
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     if (
-      authStep !== 'ready' ||
       !phoneVerified ||
       !phoneVerificationToken ||
       !verifiedPhone ||
@@ -839,7 +916,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
   return (
     <>
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
       {isSuccess ? (
         <div
           ref={confirmationRef}
@@ -933,63 +1010,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
           </div>
 
           <div className="space-y-3">
-            <div ref={pickupTimingMenuRef} className="relative w-[184px] max-w-full">
-              <button
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={isPickupTimingOpen}
-                onClick={() => setIsPickupTimingOpen((isOpen) => !isOpen)}
-                className={cn(
-                  'flex h-12 w-full items-center justify-between gap-3 rounded-[20px] border border-zinc-200 bg-white px-4 text-sm font-semibold leading-none text-zinc-950 shadow-sm shadow-zinc-950/5 outline-none transition-colors',
-                  'hover:border-zinc-300 hover:bg-zinc-50 focus:border-zinc-950 focus:ring-4 focus:ring-zinc-950/5',
-                  'dark:border-zinc-800 dark:bg-zinc-950 dark:text-white dark:shadow-black/20 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:focus:border-amber-300 dark:focus:ring-amber-300/10'
-                )}
-              >
-                <CalendarClock className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate text-left">
-                  {pickupTiming === 'NOW' ? 'Pickup now' : 'Schedule later'}
-                </span>
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 shrink-0 text-zinc-500 transition-transform dark:text-zinc-400',
-                    isPickupTimingOpen && 'rotate-180'
-                  )}
-                  aria-hidden="true"
-                />
-              </button>
-
-              {isPickupTimingOpen && (
-                <div
-                  role="listbox"
-                  aria-label="Pickup timing"
-                  className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 overflow-hidden rounded-[18px] border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
-                >
-                  {[
-                    { value: 'NOW', label: 'Pickup now' },
-                    { value: 'LATER', label: 'Schedule later' },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="option"
-                      aria-selected={pickupTiming === option.value}
-                      onClick={() => handlePickupTimingChange(option.value as PickupTiming)}
-                      className={cn(
-                        'flex min-h-10 w-full items-center rounded-[14px] px-3 text-left text-sm font-semibold text-zinc-950 transition-colors',
-                        'hover:bg-zinc-100 focus:bg-zinc-100 focus:outline-none',
-                        'dark:text-white dark:hover:bg-zinc-900 dark:focus:bg-zinc-900',
-                        pickupTiming === option.value && 'bg-zinc-100 dark:bg-zinc-900'
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <BookingField
-              name="pickupLocation"
+              name="pickup_location_field"
               value={pickupField.address}
               onChange={handleInputChange}
               onFocus={() => {
@@ -999,14 +1021,17 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
               onBlur={() => window.setTimeout(() => setActiveLocationField(null), 120)}
               onKeyDown={(event) => handleLocationFieldKeyDown(event, 'pickupLocation')}
               placeholder="Pickup location"
-              error={errors.pickupLocation}
+              error={errors.pickupLocation || pickupLocationError || undefined}
               icon="pickup"
               suggestions={activeLocationField === 'pickupLocation' ? activeLocationSuggestions : []}
               highlightedSuggestionIndex={highlightedSuggestionIndex}
               onSuggestionSelect={(cityName) => handleLocationSuggestionSelect('pickupLocation', cityName)}
+              showLocationIcon
+              onLocationIconClick={handleUseCurrentLocation}
+              isLoadingLocation={isLocatingPickup}
             />
             <BookingField
-              name="dropoffLocation"
+              name="dropoff_location_field"
               value={dropoffField.address}
               onChange={handleInputChange}
               onFocus={() => {
@@ -1021,83 +1046,66 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
               suggestions={activeLocationField === 'dropoffLocation' ? activeLocationSuggestions : []}
               highlightedSuggestionIndex={highlightedSuggestionIndex}
               onSuggestionSelect={(cityName) => handleLocationSuggestionSelect('dropoffLocation', cityName)}
-            />
+             />
 
-            {pickupTiming === 'LATER' && (
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-                <BookingField
-                  name="pickupDate"
-                  type="date"
-                  value={pickupDate}
-                  onChange={handleInputChange}
-                  min={new Date().toISOString().split('T')[0]}
-                  placeholder="Pickup date"
-                  error={errors.pickupDateTime}
-                  required
+             <div ref={pickupTimingMenuRef} className="relative inline-block">
+              <button
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={isPickupTimingOpen}
+                onClick={() => setIsPickupTimingOpen((isOpen) => !isOpen)}
+                className={cn(
+                  'inline-flex h-9 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3.5 text-sm font-semibold text-zinc-950 shadow-sm shadow-zinc-950/5 outline-none transition-colors',
+                  'hover:border-zinc-300 hover:bg-zinc-50 focus:border-zinc-950 focus:ring-4 focus:ring-zinc-950/5',
+                  'dark:border-zinc-800 dark:bg-zinc-950 dark:text-white dark:shadow-black/20 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:focus:border-amber-300 dark:focus:ring-amber-300/10'
+                )}
+              >
+                <CalendarClock className="h-3.5 w-3.5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                <span>
+                  {pickupTiming === 'NOW' ? 'Pickup now' : 'Schedule later'}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    'h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform dark:text-zinc-400',
+                    isPickupTimingOpen && 'rotate-180'
+                  )}
+                  aria-hidden="true"
                 />
-                <BookingField
-                  name="pickupTime"
-                  type="time"
-                  value={pickupTime}
-                  onChange={handleInputChange}
-                  placeholder="Pickup time"
-                  error={!pickupDate ? undefined : errors.pickupDateTime}
-                  required
-                />
-              </div>
-            )}
+              </button>
 
-            {bookingMode === 'ROUND_TRIP' && (
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-                <BookingField
-                  name="returnDate"
-                  type="date"
-                  value={returnDate}
-                  onChange={handleInputChange}
-                  min={pickupTiming === 'LATER' && pickupDate ? pickupDate : new Date().toISOString().split('T')[0]}
-                  placeholder="Return date"
-                  error={errors.returnDateTime}
-                  required
-                />
-                <BookingField
-                  name="returnTime"
-                  type="time"
-                  value={returnTime}
-                  onChange={handleInputChange}
-                  placeholder="Return time"
-                  error={!returnDate ? undefined : errors.returnDateTime}
-                  required
-                />
-              </div>
-            )}
-          </div>
+              {isPickupTimingOpen && (
+                <div
+                  role="listbox"
+                  aria-label="Pickup timing"
+                  className="absolute left-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-[16px] border border-zinc-200 bg-white p-1 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
+                >
+                  {[
+                    { value: 'NOW', label: 'Pickup now' },
+                    { value: 'LATER', label: 'Schedule later' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="option"
+                      aria-selected={pickupTiming === option.value}
+                      onClick={() => handlePickupTimingChange(option.value as PickupTiming)}
+                      className={cn(
+                        'flex min-h-9 w-full items-center rounded-[12px] px-3 text-left text-sm font-semibold text-zinc-950 transition-colors',
+                        'hover:bg-zinc-100 focus:bg-zinc-100 focus:outline-none',
+                        'dark:text-white dark:hover:bg-zinc-900 dark:focus:bg-zinc-900',
+                        pickupTiming === option.value && 'bg-zinc-100 dark:bg-zinc-900'
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          <button
-            type="button"
-            onClick={handleUseCurrentLocation}
-            disabled={isLocatingPickup}
-            className="inline-flex min-h-8 items-center justify-center rounded-full px-1 text-sm font-semibold text-zinc-600 transition-colors hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-300 dark:hover:text-white"
-          >
-            {isLocatingPickup ? 'Getting current location...' : 'Use current location'}
-          </button>
+           </div>
 
-          {pickupLocationError && (
-            <p className="text-sm text-red-600 dark:text-red-400">{pickupLocationError}</p>
-          )}
-
-          {pickupTiming === 'LATER' && formData.pickupDateTime && !errors.pickupDateTime && (
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Pickup: {formatPickupDateTime(formData.pickupDateTime)}
-            </p>
-          )}
-
-          {bookingMode === 'ROUND_TRIP' && returnDateTime && !errors.returnDateTime && (
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Return: {formatPickupDateTime(returnDateTime)}
-            </p>
-          )}
-
-          {routeMessage && (
+           {routeMessage && (
             <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
               {routeMessage}
             </div>
@@ -1132,6 +1140,97 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
         </div>
       )}
     </form>
+    {showDateTimeModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-4 py-6 backdrop-blur-sm">
+        <div className="w-full max-w-lg overflow-y-auto rounded-[26px] bg-white p-5 shadow-2xl shadow-zinc-950/25 dark:bg-zinc-950 sm:p-6">
+          <div className="mb-5 flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white">When&apos;s your ride?</h3>
+              <div className="mt-3 space-y-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Pickup:</span> {formData.pickupLocation}</p>
+                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Dropoff:</span> {formData.dropoffLocation}</p>
+                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Ride type:</span> {bookingMode === 'ROUND_TRIP' ? 'Round Trip' : 'One Way'}</p>
+                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Pickup mode:</span> {pickupTiming === 'NOW' ? 'Pickup now' : 'Schedule later'}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDateTimeModal(false)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+
+          {pickupTiming === 'LATER' && (
+            <div className="mb-5">
+              <h4 className="mb-3 text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Pickup date &amp; time</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BookingField
+                  name="pickupDate"
+                  type="date"
+                  value={pickupDate}
+                  onChange={handleInputChange}
+                  min={new Date().toISOString().split('T')[0]}
+                  placeholder="Pickup date"
+                  error={errors.pickupDateTime}
+                  required
+                />
+                <BookingField
+                  name="pickupTime"
+                  type="time"
+                  value={pickupTime}
+                  onChange={handleInputChange}
+                  placeholder="Pickup time"
+                  error={!pickupDate ? undefined : errors.pickupDateTime}
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          {bookingMode === 'ROUND_TRIP' && (
+            <div className="mb-5">
+              <h4 className="mb-3 text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Return date &amp; time</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BookingField
+                  name="returnDate"
+                  type="date"
+                  value={returnDate}
+                  onChange={handleInputChange}
+                  min={pickupTiming === 'LATER' && pickupDate ? pickupDate : new Date().toISOString().split('T')[0]}
+                  placeholder="Return date"
+                  error={errors.returnDateTime}
+                  required
+                />
+                <BookingField
+                  name="returnTime"
+                  type="time"
+                  value={returnTime}
+                  onChange={handleInputChange}
+                  placeholder="Return time"
+                  error={!returnDate ? undefined : errors.returnDateTime}
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleConfirmDateTime}
+            className={cn(
+              mainActionClassName,
+              'w-full'
+            )}
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    )}
+
     {priceQuote && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-4 py-6 backdrop-blur-sm">
         <div className="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-y-auto rounded-[26px] bg-white p-5 shadow-2xl shadow-zinc-950/25 dark:bg-zinc-950 sm:p-6">
@@ -1279,48 +1378,34 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                       {otpResendSeconds > 0 ? `Resend ${otpResendSeconds}s` : otpSent ? 'Resend code' : 'Send code'}
                     </button>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                    <BookingField
-                      name="otpCode"
-                      value={otpCode}
-                      onChange={(event) => {
-                        setOtpCode(event.target.value);
-                        setAuthError(null);
-                      }}
-                      placeholder="6-digit code"
-                      inputMode="numeric"
-                      maxLength={6}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={handleVerifyOtp}
-                      disabled={isAuthBusy || !otpSent || !otpCode.trim()}
-                      className="flex min-h-13 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
-                    >
-                      Verify code
-                    </button>
-                  </div>
-                  {devOtpCode && (
+                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                      <BookingField
+                        name="otpCode"
+                        value={otpCode}
+                        onChange={(event) => {
+                          setOtpCode(event.target.value);
+                          setAuthError(null);
+                        }}
+                        placeholder="6-digit code"
+                        inputMode="numeric"
+                        maxLength={6}
+                        required
+                      />
+                    </div>
+                    {devOtpCode && (
                     <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                       Dev code: {devOtpCode}
                     </p>
                   )}
                 </div>
-              )}
+               )}
 
-              {authStep === 'ready' && (
-                <div className="rounded-[18px] bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
-                  Phone verified. You can now book your ride.
-                </div>
-              )}
-
-              {authError && (
-                <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                  {authError}
-                </div>
-              )}
-            </div>
+               {authError && (
+                 <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                   {authError}
+                 </div>
+               )}
+             </div>
 
             <textarea
               name="specialInstructions"
@@ -1352,7 +1437,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
             <button
               type="button"
               onClick={handleBookNow}
-              disabled={isSubmitting || !phoneVerified}
+              disabled={isSubmitting || !otpSent}
               className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
             >
               {isSubmitting ? 'Booking...' : 'Book Now'}
@@ -1388,6 +1473,9 @@ function BookingField({
   suggestions = [],
   highlightedSuggestionIndex = 0,
   onSuggestionSelect,
+  showLocationIcon,
+  onLocationIconClick,
+  isLoadingLocation,
   ...props
 }: BookingFieldProps) {
   return (
@@ -1410,15 +1498,40 @@ function BookingField({
         )}
         <input
           {...props}
+          autoComplete="new-password"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           aria-invalid={!!error}
           aria-autocomplete={suggestions.length > 0 ? 'list' : undefined}
           aria-expanded={suggestions.length > 0 ? true : undefined}
           className={cn(
             'min-h-11 w-full min-w-0 bg-transparent text-base font-medium text-zinc-950 outline-none placeholder:text-zinc-400',
             'dark:text-white dark:placeholder:text-zinc-500',
+            showLocationIcon && 'pr-10',
             className
           )}
         />
+        {showLocationIcon && (
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={onLocationIconClick}
+            disabled={isLoadingLocation}
+            title="Use current location"
+            aria-label="Use current location"
+            className={cn(
+              'absolute right-4 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-zinc-700',
+              'dark:text-zinc-500 dark:hover:text-zinc-200',
+              isLoadingLocation && 'pointer-events-none opacity-50'
+            )}
+          >
+            {isLoadingLocation
+              ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              : <Navigation className="h-4 w-4 rotate-[-45deg]" aria-hidden="true" />
+            }
+          </button>
+        )}
       </div>
       {suggestions.length > 0 && onSuggestionSelect && (
         <div

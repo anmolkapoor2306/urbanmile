@@ -1,17 +1,22 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
+import { Search } from 'lucide-react';
 import { CONTACT_PHONE_HREF } from '@/lib/contact';
 import { useTheme } from '@/context/ThemeContext';
+import { FindBookingFormModal } from '@/components/form/FindBookingForm';
 
 export function Navbar() {
   const { theme, toggleTheme } = useTheme();
+  const [findBookingOpen, setFindBookingOpen] = useState(false);
 
   const scrollToSection = (sectionId: 'ride' | 'about') => {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
+    <>
     <nav className="sticky top-0 z-50 border-b border-zinc-200/80 bg-white/95 text-zinc-950 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 dark:text-white">
       <div className="mx-auto w-full max-w-[1536px] px-4 md:px-5 lg:px-8">
         <div className="flex min-h-[72px] items-center justify-between gap-3 py-4">
@@ -60,6 +65,14 @@ export function Navbar() {
                 </svg>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setFindBookingOpen(true)}
+              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900 sm:min-h-11 sm:px-5"
+            >
+              <Search className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Find Booking</span>
+            </button>
             <a
               href={CONTACT_PHONE_HREF}
               className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-full bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 sm:min-h-11 sm:px-5"
@@ -70,5 +83,8 @@ export function Navbar() {
         </div>
       </div>
     </nav>
+
+    <FindBookingFormModal isOpen={findBookingOpen} onClose={() => setFindBookingOpen(false)} />
+  </>
   );
 }

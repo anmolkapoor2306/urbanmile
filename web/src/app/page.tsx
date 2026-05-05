@@ -4,7 +4,6 @@ import Image from 'next/image';
 import { Clock, Headphones, IndianRupee, ShieldCheck } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { BookingForm } from '@/components/form/BookingForm';
-import { FindBookingForm } from '@/components/form/FindBookingForm';
 
 const features = [
   {
@@ -34,12 +33,15 @@ export default function Home() {
     <main className="public-home min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <Navbar />
 
-      <section id="ride" className="relative flex min-h-[calc(100vh-80px)] items-center bg-zinc-50 py-12 dark:bg-zinc-900 lg:py-16">
-        <div className="mx-auto grid w-full max-w-[1536px] grid-cols-1 items-start gap-8 px-4 md:px-5 lg:grid-cols-[minmax(520px,600px)_minmax(640px,760px)] lg:justify-between lg:gap-16 lg:px-8">
-          <div className="min-w-0 w-full">
+      <section id="ride" className="relative flex flex-col bg-zinc-50 py-12 dark:bg-zinc-900 lg:py-10">
+        <div className="mx-auto grid w-full max-w-[1536px] grid-cols-1 gap-8 px-4 md:px-5 lg:grid-cols-[minmax(520px,600px)_minmax(600px,720px)] lg:items-stretch lg:justify-between lg:gap-12 lg:px-8">
+          <div className="flex min-w-0 w-full flex-col">
             <div className="w-full max-w-[560px] space-y-4">
               <span className="inline-flex items-center gap-2 self-start rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-400/10 dark:text-amber-300">
-                <span className="h-2 w-2 rounded-full bg-amber-500" />
+                <span className="relative inline-flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-block h-2 w-2 rounded-full bg-green-500" />
+                </span>
                 Available 24/7
               </span>
 
@@ -55,18 +57,17 @@ export default function Home() {
 
               <div className="w-full max-w-[560px] rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_28px_80px_rgba(15,23,42,0.13)] dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30">
                 <BookingForm />
-                <FindBookingForm />
               </div>
             </div>
           </div>
 
-          <div className="relative h-[680px] w-full min-w-0 self-start overflow-hidden rounded-3xl shadow-xl">
+          <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[24px] shadow-xl">
             <Image
               src="/images/new_car.png"
               alt="UrbanMiles Car"
               fill
               priority
-              sizes="(min-width: 1024px) 760px, 100vw"
+              sizes="(min-width: 1024px) 720px, 100vw"
               className="object-cover object-center"
             />
           </div>
