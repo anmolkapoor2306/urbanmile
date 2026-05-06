@@ -98,7 +98,15 @@ export function normalizeLocation(value: string): string {
 }
 
 function matchesCity(input: string, city: string) {
-  return normalizeLocation(input) === normalizeLocation(city);
+  const normalizedInput = normalizeLocation(input);
+  const normalizedCity = normalizeLocation(city);
+
+  return (
+    normalizedInput === normalizedCity ||
+    normalizedInput.startsWith(`${normalizedCity} `) ||
+    normalizedInput.endsWith(` ${normalizedCity}`) ||
+    normalizedInput.includes(` ${normalizedCity} `)
+  );
 }
 
 export function getFixedCitySuggestions(query: string): string[] {

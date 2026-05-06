@@ -12,16 +12,6 @@ You are working on the UrbanMiles codebase. Stability is critical. Do NOT break 
 
 ---
 
-## 🔴 Execution Mode (MANDATORY)
-
-- Use SINGLE AGENT execution only.
-- Do NOT create or use sub-agents, planners, reviewers, or orchestration.
-- Do NOT split tasks into steps internally.
-- Do NOT generate plans unless explicitly asked.
-- Execute tasks directly and minimally.
-
----
-
 ## 🧠 Before Editing
 
 - Understand the exact task.

@@ -1,7 +1,21 @@
 'use client';
 
-import { useState, FormEvent, useEffect, useRef } from 'react';
-import { CalendarClock, ChevronDown, Loader2, Navigation, ShieldCheck, X } from 'lucide-react';
+import { useState, FormEvent, useEffect, useMemo, useRef } from 'react';
+import {
+  ArrowLeft,
+  CalendarClock,
+  Car,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  CreditCard,
+  Loader2,
+  MapPin,
+  Navigation,
+  ShieldCheck,
+  Users,
+  X,
+} from 'lucide-react';
 import { z } from 'zod';
 import { cn } from '@/lib/utils';
 import { CONTACT_PHONE_HREF } from '@/lib/contact';
@@ -15,6 +29,7 @@ import {
 
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
+const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -42,11 +57,34 @@ const bookingSchema = z.object({
 type BookingFormData = z.infer<typeof bookingSchema>;
 type BookingMode = 'ONE_WAY' | 'ROUND_TRIP';
 type PickupTiming = 'NOW' | 'LATER';
-type RideOption = 'SEDAN' | 'SUV';
+type RideOption = 'SEDAN' | 'SUV' | 'VAN';
 type LocationFieldName = 'pickupLocation' | 'dropoffLocation';
 type BookingErrorField = keyof BookingFormData | 'returnDateTime';
 type BookingAuthProvider = 'google' | 'phone_guest';
 type BookingAuthStep = 'choice' | 'otp' | 'ready';
+type AddressSuggestion = {
+  id: string;
+  formatted: string;
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string;
+  addressLine1: string;
+  addressLine2: string;
+};
+type GeoapifyAutocompleteResult = {
+  formatted?: string;
+  lat?: number;
+  lon?: number;
+  place_id?: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+};
+type GeoapifyAutocompleteResponse = {
+  results?: GeoapifyAutocompleteResult[];
+};
 type BookingResponseItem = {
   bookingReference?: string;
   publicBookingId?: string;
@@ -55,6 +93,12 @@ type BookingResponseItem = {
   dropoffLocation?: string;
   pickupDateTime?: string;
   carType?: string;
+};
+type RoutePreviewState = {
+  distanceKm: number | null;
+  durationMinutes: number | null;
+  isLoading: boolean;
+  error: string | null;
 };
 
 type CustomerProfile = {
@@ -87,6 +131,14 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   const [routeMessage, setRouteMessage] = useState<string | null>(null);
   const [activeLocationField, setActiveLocationField] = useState<LocationFieldName | null>(null);
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0);
+  const [addressSuggestions, setAddressSuggestions] = useState<Record<LocationFieldName, AddressSuggestion[]>>({
+    pickupLocation: [],
+    dropoffLocation: [],
+  });
+  const [isAddressLoading, setIsAddressLoading] = useState<Record<LocationFieldName, boolean>>({
+    pickupLocation: false,
+    dropoffLocation: false,
+  });
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingReferences, setBookingReferences] = useState<string[]>([]);
   const [createdBookingDetails, setCreatedBookingDetails] = useState<BookingResponseItem[]>([]);
@@ -136,7 +188,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
   const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
   const [showDateTimeModal, setShowDateTimeModal] = useState(false);
 
-  const finalPrice = priceQuote ? priceQuote.sedanPrice + (selectedRide === 'SUV' ? 1000 : 0) : 0;
+  const finalPrice = priceQuote ? getRideFare(priceQuote, selectedRide) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
   const returnDateTime = buildPickupDateTime(returnDate, returnTime);
   const isRouteUnavailable = routeMessage === UNAVAILABLE_ROUTE_MESSAGE;
@@ -147,8 +199,69 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
         ? dropoffField.address
         : '';
   const activeLocationSuggestions = activeLocationField
-    ? getFixedCitySuggestions(activeLocationValue).slice(0, 8)
+    ? addressSuggestions[activeLocationField]
     : [];
+  const rideOptions = useMemo(() => buildRideOptions(priceQuote), [priceQuote]);
+  const pickupDisplayTime =
+    pickupTiming === 'NOW'
+      ? 'Pickup now'
+      : formData.pickupDateTime
+        ? formatPickupDateTime(formData.pickupDateTime)
+        : 'Scheduled time pending';
+
+  const handleRideSelect = (nextRide: RideOption) => {
+    if (!priceQuote) {
+      return;
+    }
+
+    const nextFare = getRideFare(priceQuote, nextRide);
+    setSelectedRide(nextRide);
+    setFormData((prev) => ({
+      ...prev,
+      carType: nextRide,
+      fareAmount: nextFare,
+    }));
+  };
+
+  useEffect(() => {
+    if (!activeLocationField) {
+      return;
+    }
+
+    const fieldName = activeLocationField;
+    const query = activeLocationValue.trim();
+
+    if (query.length < 2) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(async () => {
+      setIsAddressLoading((prev) => ({ ...prev, [fieldName]: true }));
+
+      try {
+        const suggestions = GEOAPIFY_API_KEY
+          ? await fetchGeoapifyAddressSuggestions(query, controller.signal)
+          : getFixedCitySuggestions(query).slice(0, 8).map(createManualAddressSuggestion);
+
+        setAddressSuggestions((prev) => ({ ...prev, [fieldName]: suggestions }));
+        setHighlightedSuggestionIndex(0);
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsAddressLoading((prev) => ({ ...prev, [fieldName]: false }));
+        }
+      }
+    }, 220);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounceTimer);
+    };
+  }, [activeLocationField, activeLocationValue]);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -214,29 +327,45 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       const fieldName = name === 'pickup_location_field' ? 'pickupLocation' : 'dropoffLocation';
       setActiveLocationField(fieldName);
       setHighlightedSuggestionIndex(0);
+      if (value.trim().length < 2) {
+        setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
+        setIsAddressLoading((prev) => ({ ...prev, [fieldName]: false }));
+      }
     }
   };
 
-  const handleLocationSuggestionSelect = (fieldName: LocationFieldName, cityName: string) => {
+  const handleLocationSuggestionSelect = (fieldName: LocationFieldName, suggestion: AddressSuggestion) => {
+    const formattedAddress = suggestion.formatted;
+
     if (fieldName === 'pickupLocation') {
-      pickupField.updateAddress(cityName);
+      pickupField.setResolvedLocation(formattedAddress, {
+        latitude: suggestion.latitude,
+        longitude: suggestion.longitude,
+        placeId: suggestion.placeId,
+        source: 'manual',
+      });
       setPickupLocationError(null);
       setFormData((prev) => ({
         ...prev,
-        pickupLocation: cityName,
-        pickupLatitude: null,
-        pickupLongitude: null,
-        pickupPlaceId: '',
+        pickupLocation: formattedAddress,
+        pickupLatitude: suggestion.latitude,
+        pickupLongitude: suggestion.longitude,
+        pickupPlaceId: suggestion.placeId,
         pickupLocationSource: 'manual',
       }));
     } else {
-      dropoffField.updateAddress(cityName);
+      dropoffField.setResolvedLocation(formattedAddress, {
+        latitude: suggestion.latitude,
+        longitude: suggestion.longitude,
+        placeId: suggestion.placeId,
+        source: 'manual',
+      });
       setFormData((prev) => ({
         ...prev,
-        dropoffLocation: cityName,
-        dropoffLatitude: null,
-        dropoffLongitude: null,
-        dropoffPlaceId: '',
+        dropoffLocation: formattedAddress,
+        dropoffLatitude: suggestion.latitude,
+        dropoffLongitude: suggestion.longitude,
+        dropoffPlaceId: suggestion.placeId,
         dropoffLocationSource: 'manual',
       }));
     }
@@ -246,6 +375,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     setPriceQuote(null);
     setActiveLocationField(null);
     setHighlightedSuggestionIndex(0);
+    setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
   };
 
   const handleLocationFieldKeyDown = (
@@ -266,7 +396,10 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       );
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      handleLocationSuggestionSelect(fieldName, activeLocationSuggestions[highlightedSuggestionIndex]);
+      const selectedSuggestion = activeLocationSuggestions[highlightedSuggestionIndex];
+      if (selectedSuggestion) {
+        handleLocationSuggestionSelect(fieldName, selectedSuggestion);
+      }
     } else if (event.key === 'Escape') {
       setActiveLocationField(null);
     }
@@ -705,7 +838,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       ...prev,
       pickupDateTime: new Date().toISOString(),
       carType: 'SEDAN',
-      fareAmount: fixedRoutePrice.sedanPrice,
+      fareAmount: getRideFare(fixedRoutePrice, 'SEDAN'),
     }));
   };
 
@@ -731,14 +864,16 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       return;
     }
 
+    const fixedRoutePrice = getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation);
+
     setShowDateTimeModal(false);
     setSelectedRide('SEDAN');
-    setPriceQuote(getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation) || null);
+    setPriceQuote(fixedRoutePrice || null);
     setFormData((prev) => ({
       ...prev,
       pickupDateTime,
       carType: 'SEDAN',
-      fareAmount: (getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation) || {}).sedanPrice,
+      fareAmount: fixedRoutePrice ? getRideFare(fixedRoutePrice, 'SEDAN') : undefined,
     }));
   };
 
@@ -1025,10 +1160,11 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
               icon="pickup"
               suggestions={activeLocationField === 'pickupLocation' ? activeLocationSuggestions : []}
               highlightedSuggestionIndex={highlightedSuggestionIndex}
-              onSuggestionSelect={(cityName) => handleLocationSuggestionSelect('pickupLocation', cityName)}
+              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('pickupLocation', suggestion)}
               showLocationIcon
               onLocationIconClick={handleUseCurrentLocation}
               isLoadingLocation={isLocatingPickup}
+              isLoadingSuggestions={activeLocationField === 'pickupLocation' && isAddressLoading.pickupLocation}
             />
             <BookingField
               name="dropoff_location_field"
@@ -1045,7 +1181,8 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
               icon="dropoff"
               suggestions={activeLocationField === 'dropoffLocation' ? activeLocationSuggestions : []}
               highlightedSuggestionIndex={highlightedSuggestionIndex}
-              onSuggestionSelect={(cityName) => handleLocationSuggestionSelect('dropoffLocation', cityName)}
+              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('dropoffLocation', suggestion)}
+              isLoadingSuggestions={activeLocationField === 'dropoffLocation' && isAddressLoading.dropoffLocation}
              />
 
              <div ref={pickupTimingMenuRef} className="relative inline-block">
@@ -1232,84 +1369,250 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
     )}
 
     {priceQuote && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-4 py-6 backdrop-blur-sm">
-        <div className="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-y-auto rounded-[26px] bg-white p-5 shadow-2xl shadow-zinc-950/25 dark:bg-zinc-950 sm:p-6">
-          <div className="mb-5 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white">Choose your ride</h3>
-              <div className="mt-3 space-y-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Pickup:</span> {formData.pickupLocation}</p>
-                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Dropoff:</span> {formData.dropoffLocation}</p>
-                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Ride type:</span> {bookingMode === 'ROUND_TRIP' ? 'Round Trip' : 'One Way'}</p>
-                <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Pickup mode:</span> {pickupTiming === 'NOW' ? 'Pickup now' : formatPickupDateTime(formData.pickupDateTime)}</p>
-                {bookingMode === 'ROUND_TRIP' && (
-                  <p><span className="font-semibold text-zinc-950 dark:text-zinc-100">Return pickup:</span> {formatPickupDateTime(returnDateTime)}</p>
-                )}
-              </div>
-            </div>
+      <RideSelectionView
+        authError={authError}
+        authStep={authStep}
+        bookingError={bookingError}
+        bookingMode={bookingMode}
+        customerProfile={customerProfile}
+        devOtpCode={devOtpCode}
+        finalPrice={finalPrice}
+        formData={formData}
+        isAuthBusy={isAuthBusy}
+        isSubmitting={isSubmitting}
+        onBack={() => setPriceQuote(null)}
+        onBookNow={handleBookNow}
+        onContinueAsGuest={handleContinueAsGuest}
+        onContinueWithGoogle={handleContinueWithGoogle}
+        onInputChange={handleInputChange}
+        onProfileChange={handleProfileChange}
+        onRideSelect={handleRideSelect}
+        onSendOtp={handleSendOtp}
+        onOtpCodeChange={(event) => {
+          setOtpCode(event.target.value);
+          setAuthError(null);
+        }}
+        onOtpPhoneChange={(event) => {
+          setOtpPhone(event.target.value);
+          setPhoneVerified(false);
+          setPhoneVerificationToken('');
+          setVerifiedPhone('');
+          setAuthError(null);
+        }}
+        otpCode={otpCode}
+        otpPhone={otpPhone}
+        otpResendSeconds={otpResendSeconds}
+        otpSent={otpSent}
+        pickupDisplayTime={pickupDisplayTime}
+        pickupTiming={pickupTiming}
+        profileErrors={profileErrors}
+        returnDateTime={returnDateTime}
+        rideOptions={rideOptions}
+        selectedRide={selectedRide}
+        totalPrice={totalPrice}
+      />
+    )}
+    </>
+  );
+}
+
+const mainActionClassName = cn(
+  'flex min-h-13 w-full items-center justify-center overflow-hidden rounded-full bg-zinc-950 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-zinc-950/15 transition-all duration-200 ease-out hover:bg-zinc-800',
+  'disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300'
+);
+
+type RideSelectionOption = {
+  value: RideOption;
+  name: string;
+  passengers: number;
+  badge: string;
+  description: string;
+  eta: string;
+  fare: number;
+};
+
+interface RideSelectionViewProps {
+  authError: string | null;
+  authStep: BookingAuthStep;
+  bookingError: string | null;
+  bookingMode: BookingMode;
+  customerProfile: CustomerProfile;
+  devOtpCode: string | null;
+  finalPrice: number;
+  formData: BookingFormData;
+  isAuthBusy: boolean;
+  isSubmitting: boolean;
+  onBack: () => void;
+  onBookNow: () => void;
+  onContinueAsGuest: () => void;
+  onContinueWithGoogle: () => void;
+  onInputChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void;
+  onOtpCodeChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onOtpPhoneChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onProfileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onRideSelect: (ride: RideOption) => void;
+  onSendOtp: () => void;
+  otpCode: string;
+  otpPhone: string;
+  otpResendSeconds: number;
+  otpSent: boolean;
+  pickupDisplayTime: string;
+  pickupTiming: PickupTiming;
+  profileErrors: Partial<Record<keyof CustomerProfile, string>>;
+  returnDateTime: string;
+  rideOptions: RideSelectionOption[];
+  selectedRide: RideOption;
+  totalPrice: number;
+}
+
+function RideSelectionView({
+  authError,
+  authStep,
+  bookingError,
+  bookingMode,
+  customerProfile,
+  devOtpCode,
+  finalPrice,
+  formData,
+  isAuthBusy,
+  isSubmitting,
+  onBack,
+  onBookNow,
+  onContinueAsGuest,
+  onContinueWithGoogle,
+  onInputChange,
+  onOtpCodeChange,
+  onOtpPhoneChange,
+  onProfileChange,
+  onRideSelect,
+  onSendOtp,
+  otpCode,
+  otpPhone,
+  otpResendSeconds,
+  otpSent,
+  pickupDisplayTime,
+  pickupTiming,
+  profileErrors,
+  returnDateTime,
+  rideOptions,
+  selectedRide,
+  totalPrice,
+}: RideSelectionViewProps) {
+  const selectedRideOption =
+    rideOptions.find((option) => option.value === selectedRide) ?? rideOptions[0];
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 top-[65px] z-40 overflow-y-auto overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white lg:overflow-hidden">
+      <div className="grid min-h-full grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
+        <section className="dashboard-scrollbar order-2 flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:order-1 lg:overflow-y-auto">
+          <div className="flex-1 space-y-5 px-4 py-5 sm:px-6">
             <button
               type="button"
-              onClick={() => setPriceQuote(null)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
-              aria-label="Close ride selection"
+              onClick={onBack}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
             >
-              <X className="h-5 w-5" aria-hidden="true" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Back
             </button>
-          </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[
-              { value: 'SEDAN', label: 'Sedan / Hatchback', price: priceQuote.sedanPrice },
-              { value: 'SUV', label: 'SUV', price: priceQuote.sedanPrice + 1000 },
-            ].map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  const nextRide = option.value as RideOption;
-                  setSelectedRide(nextRide);
-                  setFormData((prev) => ({
-                    ...prev,
-                    carType: nextRide,
-                    fareAmount: option.price,
-                  }));
-                }}
-                className={cn(
-                  'rounded-[20px] border p-4 text-left transition-colors',
-                  selectedRide === option.value
-                    ? 'border-amber-400 bg-amber-50 shadow-sm dark:border-amber-300 dark:bg-amber-400/10'
-                    : 'border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700'
-                )}
-              >
-                <span className="block text-base font-bold text-zinc-950 dark:text-white">{option.label}</span>
-                <span className="mt-2 block text-2xl font-black text-zinc-950 dark:text-amber-200">
-                  {formatMoney(option.price)}
-                </span>
-              </button>
-            ))}
-          </div>
+            <div>
+              <h2 className="text-3xl font-black tracking-tight text-zinc-950 dark:text-white">
+                Choose a ride
+              </h2>
+              <p className="mt-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                Choose the best option for your trip
+              </p>
+            </div>
 
-          <div className="mt-5 rounded-[20px] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">Outgoing price</span>
-                <span className="text-base font-bold text-zinc-950 dark:text-white">{formatMoney(finalPrice)}</span>
+            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-black uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+                  Trip summary
+                </h3>
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="rounded-full px-3 py-1.5 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-400/10"
+                >
+                  Edit
+                </button>
               </div>
-              {bookingMode === 'ROUND_TRIP' && (
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">Return price</span>
-                  <span className="text-base font-bold text-zinc-950 dark:text-white">{formatMoney(finalPrice)}</span>
+              <div className="space-y-3 text-sm">
+                <TripSummaryRow iconClassName="bg-zinc-950 dark:bg-white" label="Pickup" value={formData.pickupLocation} />
+                <TripSummaryRow iconClassName="bg-amber-500" label="Dropoff" value={formData.dropoffLocation} />
+                <div className="flex items-start gap-3">
+                  <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+                      Pickup time
+                    </p>
+                    <p className="mt-1 font-bold text-zinc-950 dark:text-white">
+                      {pickupDisplayTime}
+                    </p>
+                  </div>
                 </div>
-              )}
-              <div className="flex items-center justify-between gap-3 border-t border-zinc-200 pt-2 dark:border-zinc-800">
-                <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">Total price</span>
-                <span className="text-2xl font-black text-zinc-950 dark:text-white">{formatMoney(totalPrice)}</span>
+                {bookingMode === 'ROUND_TRIP' && (
+                  <p className="rounded-[16px] bg-white px-3 py-2 text-sm font-semibold text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                    Return pickup: {formatPickupDateTime(returnDateTime)}
+                  </p>
+                )}
               </div>
             </div>
-          </div>
 
-          <div className="mt-5 space-y-4">
-            <div className="rounded-[20px] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="space-y-3">
+              {rideOptions.map((option) => {
+                const isSelected = selectedRide === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onRideSelect(option.value)}
+                    className={cn(
+                      'group flex w-full items-center gap-4 rounded-[24px] border p-4 text-left transition-all',
+                      isSelected
+                        ? 'border-amber-400 bg-amber-50 shadow-lg shadow-amber-500/10 ring-2 ring-amber-300/40 dark:border-amber-300 dark:bg-amber-400/10 dark:ring-amber-300/20'
+                        : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900'
+                    )}
+                  >
+                    <div className={cn(
+                      'flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border',
+                      isSelected
+                        ? 'border-amber-300 bg-white text-zinc-950 dark:bg-zinc-950 dark:text-amber-200'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200'
+                    )}>
+                      <Car className="h-7 w-7" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-black text-zinc-950 dark:text-white">{option.name}</h3>
+                        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                          {option.badge}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                        <span className="inline-flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                          {option.passengers} passengers
+                        </span>
+                        <span>{option.eta} pickup</span>
+                      </div>
+                      <p className="mt-1 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                        {option.description}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-lg font-black text-zinc-950 dark:text-white">
+                        {formatMoney(option.fare)}
+                      </p>
+                      <ChevronRight className="ml-auto mt-1 h-5 w-5 text-zinc-400 transition-transform group-hover:translate-x-0.5 dark:text-zinc-500" aria-hidden="true" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-[24px] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
               <div className="mb-4 flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-amber-500" aria-hidden="true" />
                 <h4 className="text-base font-bold text-zinc-950 dark:text-white">Verify customer details</h4>
@@ -1319,7 +1622,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
-                    onClick={handleContinueWithGoogle}
+                    onClick={onContinueWithGoogle}
                     disabled={isAuthBusy}
                     className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-70 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
                   >
@@ -1327,7 +1630,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                   </button>
                   <button
                     type="button"
-                    onClick={handleContinueAsGuest}
+                    onClick={onContinueAsGuest}
                     className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
                   >
                     Continue as Guest with Phone
@@ -1341,7 +1644,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                     <BookingField
                       name="fullName"
                       value={customerProfile.fullName}
-                      onChange={handleProfileChange}
+                      onChange={onProfileChange}
                       placeholder="Full name"
                       error={profileErrors.fullName}
                       required
@@ -1350,7 +1653,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                       name="email"
                       type="email"
                       value={customerProfile.email}
-                      onChange={handleProfileChange}
+                      onChange={onProfileChange}
                       placeholder="Email optional"
                       error={profileErrors.email}
                     />
@@ -1359,58 +1662,47 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                     <BookingField
                       name="otpPhone"
                       value={otpPhone}
-                      onChange={(event) => {
-                        setOtpPhone(event.target.value);
-                        setPhoneVerified(false);
-                        setPhoneVerificationToken('');
-                        setVerifiedPhone('');
-                        setAuthError(null);
-                      }}
+                      onChange={onOtpPhoneChange}
                       placeholder="Phone number"
                       required
                     />
                     <button
                       type="button"
-                      onClick={handleSendOtp}
+                      onClick={onSendOtp}
                       disabled={isAuthBusy || otpResendSeconds > 0}
                       className="flex min-h-13 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
                     >
                       {otpResendSeconds > 0 ? `Resend ${otpResendSeconds}s` : otpSent ? 'Resend code' : 'Send code'}
                     </button>
                   </div>
-                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <BookingField
-                        name="otpCode"
-                        value={otpCode}
-                        onChange={(event) => {
-                          setOtpCode(event.target.value);
-                          setAuthError(null);
-                        }}
-                        placeholder="6-digit code"
-                        inputMode="numeric"
-                        maxLength={6}
-                        required
-                      />
-                    </div>
-                    {devOtpCode && (
+                  <BookingField
+                    name="otpCode"
+                    value={otpCode}
+                    onChange={onOtpCodeChange}
+                    placeholder="6-digit code"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                  />
+                  {devOtpCode && (
                     <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                       Dev code: {devOtpCode}
                     </p>
                   )}
                 </div>
-               )}
+              )}
 
-               {authError && (
-                 <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                   {authError}
-                 </div>
-               )}
-             </div>
+              {authError && (
+                <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                  {authError}
+                </div>
+              )}
+            </div>
 
             <textarea
               name="specialInstructions"
               value={formData.specialInstructions ?? ''}
-              onChange={handleInputChange}
+              onChange={onInputChange}
               placeholder="Note optional"
               className={cn(
                 'min-h-24 w-full resize-none rounded-[20px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-base font-medium text-zinc-950 outline-none transition-colors placeholder:text-zinc-400',
@@ -1418,52 +1710,315 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
                 'dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-amber-300 dark:focus:bg-zinc-950 dark:focus:ring-amber-300/10'
               )}
             />
+
+            {bookingError && (
+              <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                {bookingError}
+              </div>
+            )}
           </div>
 
-          {bookingError && (
-            <div className="mt-5 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-              {bookingError}
+          <div className="sticky bottom-0 border-t border-zinc-200 bg-white/95 p-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 sm:px-6">
+            <div className="flex flex-col gap-3 rounded-[24px] border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/80 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-zinc-800 dark:bg-zinc-950 dark:text-amber-200">
+                  <CreditCard className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+                    Pay in car
+                  </p>
+                  <p className="truncate text-sm font-bold text-zinc-950 dark:text-white">
+                    {selectedRideOption?.name ?? 'Miles Eco'} · {formatMoney(totalPrice)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onBookNow}
+                disabled={isSubmitting}
+                className="flex min-h-12 shrink-0 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-black text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+              >
+                {isSubmitting ? 'Booking...' : `Confirm ${selectedRideOption?.name ?? 'Miles Eco'}`}
+              </button>
             </div>
-          )}
-
-          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setPriceQuote(null)}
-              className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-6 text-sm font-bold text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleBookNow}
-              disabled={isSubmitting || !otpSent}
-              className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
-            >
-              {isSubmitting ? 'Booking...' : 'Book Now'}
-            </button>
           </div>
-        </div>
+        </section>
+
+        <section className="order-1 min-h-[360px] bg-zinc-200 dark:bg-zinc-900 lg:order-2 lg:min-h-0">
+          <RideMapPreview
+            dropoffLatitude={formData.dropoffLatitude ?? null}
+            dropoffLongitude={formData.dropoffLongitude ?? null}
+            finalPrice={finalPrice}
+            pickupDisplayTime={pickupTiming === 'NOW' ? 'Now' : pickupDisplayTime}
+            pickupLatitude={formData.pickupLatitude ?? null}
+            pickupLongitude={formData.pickupLongitude ?? null}
+          />
+        </section>
       </div>
-    )}
-    </>
+    </div>
   );
 }
 
-const mainActionClassName = cn(
-  'flex min-h-13 w-full items-center justify-center overflow-hidden rounded-full bg-zinc-950 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-zinc-950/15 transition-all duration-200 ease-out hover:bg-zinc-800',
-  'disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300'
-);
+function TripSummaryRow({
+  iconClassName,
+  label,
+  value,
+}: {
+  iconClassName: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className={cn('mt-1.5 h-3 w-3 shrink-0 rounded-full', iconClassName)} />
+      <div className="min-w-0">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+          {label}
+        </p>
+        <p className="mt-1 break-words font-bold text-zinc-950 dark:text-white">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function RideMapPreview({
+  dropoffLatitude,
+  dropoffLongitude,
+  finalPrice,
+  pickupDisplayTime,
+  pickupLatitude,
+  pickupLongitude,
+}: {
+  dropoffLatitude: number | null;
+  dropoffLongitude: number | null;
+  finalPrice: number;
+  pickupDisplayTime: string;
+  pickupLatitude: number | null;
+  pickupLongitude: number | null;
+}) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [routePreview, setRoutePreview] = useState<RoutePreviewState>({
+    distanceKm: null,
+    durationMinutes: null,
+    isLoading: false,
+    error: null,
+  });
+  const hasCoordinates =
+    typeof pickupLatitude === 'number' &&
+    typeof pickupLongitude === 'number' &&
+    typeof dropoffLatitude === 'number' &&
+    typeof dropoffLongitude === 'number';
+
+  useEffect(() => {
+    if (!hasCoordinates || !mapContainerRef.current) {
+      setRoutePreview({
+        distanceKm: null,
+        durationMinutes: null,
+        isLoading: false,
+        error: 'Choose Geoapify pickup and dropoff suggestions to preview the route.',
+      });
+      return;
+    }
+
+    let isMounted = true;
+    let map: import('maplibre-gl').Map | null = null;
+
+    setRoutePreview({ distanceKm: null, durationMinutes: null, isLoading: true, error: null });
+
+    const initMap = async () => {
+      const maplibregl = await import('maplibre-gl');
+
+      if (!isMounted || !mapContainerRef.current) {
+        return;
+      }
+
+      const pickup: [number, number] = [pickupLongitude, pickupLatitude];
+      const dropoff: [number, number] = [dropoffLongitude, dropoffLatitude];
+      const center: [number, number] = [
+        (pickup[0] + dropoff[0]) / 2,
+        (pickup[1] + dropoff[1]) / 2,
+      ];
+
+      map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors',
+            },
+          },
+          layers: [
+            {
+              id: 'osm',
+              type: 'raster',
+              source: 'osm',
+            },
+          ],
+        },
+        center,
+        zoom: 8,
+        attributionControl: false,
+      });
+
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+      const pickupMarker = document.createElement('div');
+      pickupMarker.className = 'h-4 w-4 rounded-full border-2 border-white bg-zinc-950 shadow-lg dark:bg-white';
+      const dropoffMarker = document.createElement('div');
+      dropoffMarker.className = 'h-4 w-4 rounded-full border-2 border-white bg-amber-500 shadow-lg';
+
+      new maplibregl.Marker({ element: pickupMarker }).setLngLat(pickup).addTo(map);
+      new maplibregl.Marker({ element: dropoffMarker }).setLngLat(dropoff).addTo(map);
+
+      map.on('load', async () => {
+        if (!map) {
+          return;
+        }
+
+        const bounds = new maplibregl.LngLatBounds().extend(pickup).extend(dropoff);
+        map.fitBounds(bounds, { padding: 90, maxZoom: 12, duration: 0 });
+
+        try {
+          const routeResponse = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${pickup[0]},${pickup[1]};${dropoff[0]},${dropoff[1]}?overview=full&geometries=geojson`
+          );
+          const routeData = await routeResponse.json() as {
+            routes?: Array<{
+              distance?: number;
+              duration?: number;
+              geometry?: GeoJSON.LineString;
+            }>;
+          };
+          const route = routeData.routes?.[0];
+
+          if (!routeResponse.ok || !route) {
+            throw new Error('Route preview unavailable');
+          }
+
+          if (route.geometry) {
+            map.addSource('selected-route', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: route.geometry,
+              },
+            });
+            map.addLayer({
+              id: 'selected-route-line',
+              type: 'line',
+              source: 'selected-route',
+              layout: {
+                'line-cap': 'round',
+                'line-join': 'round',
+              },
+              paint: {
+                'line-color': '#f59e0b',
+                'line-width': 5,
+                'line-opacity': 0.9,
+              },
+            });
+          }
+
+          if (isMounted) {
+            setRoutePreview({
+              distanceKm: typeof route.distance === 'number' ? route.distance / 1000 : null,
+              durationMinutes: typeof route.duration === 'number' ? Math.round(route.duration / 60) : null,
+              isLoading: false,
+              error: null,
+            });
+          }
+        } catch {
+          if (isMounted) {
+            setRoutePreview({
+              distanceKm: null,
+              durationMinutes: null,
+              isLoading: false,
+              error: 'Route line is unavailable right now.',
+            });
+          }
+        }
+      });
+    };
+
+    void initMap();
+
+    return () => {
+      isMounted = false;
+      map?.remove();
+    };
+  }, [dropoffLatitude, dropoffLongitude, hasCoordinates, pickupLatitude, pickupLongitude]);
+
+  if (!hasCoordinates) {
+    return (
+      <div className="flex h-full min-h-[360px] items-center justify-center bg-zinc-100 p-6 dark:bg-zinc-900">
+        <div className="max-w-sm rounded-[28px] border border-zinc-200 bg-white p-6 text-center shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30">
+          <MapPin className="mx-auto h-8 w-8 text-amber-500" aria-hidden="true" />
+          <h3 className="mt-3 text-lg font-black text-zinc-950 dark:text-white">Map preview</h3>
+          <p className="mt-2 text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
+            Select Geoapify pickup and dropoff suggestions to show markers and route details.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-full min-h-[360px] overflow-hidden">
+      <div ref={mapContainerRef} className="h-full w-full" />
+      <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-[24px] border border-white/70 bg-white/95 p-4 shadow-2xl shadow-zinc-950/20 backdrop-blur dark:border-zinc-800/90 dark:bg-zinc-950/95">
+        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <RouteInfoItem label="Pickup" value={pickupDisplayTime} />
+          <RouteInfoItem
+            label="Distance"
+            value={routePreview.isLoading ? 'Loading...' : formatDistance(routePreview.distanceKm)}
+          />
+          <RouteInfoItem
+            label="Trip time"
+            value={routePreview.isLoading ? 'Loading...' : formatTripDuration(routePreview.durationMinutes)}
+          />
+          <RouteInfoItem label="Fare" value={formatMoney(finalPrice)} />
+        </div>
+        {routePreview.error && (
+          <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
+            {routePreview.error}
+          </p>
+        )}
+        <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          Fares are estimates and may vary.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RouteInfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 font-black text-zinc-950 dark:text-white">{value}</p>
+    </div>
+  );
+}
 
 interface BookingFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   icon?: 'pickup' | 'dropoff';
-  suggestions?: string[];
+  suggestions?: AddressSuggestion[];
   highlightedSuggestionIndex?: number;
-  onSuggestionSelect?: (cityName: string) => void;
+  onSuggestionSelect?: (suggestion: AddressSuggestion) => void;
   showLocationIcon?: boolean;
   onLocationIconClick?: () => void;
   isLoadingLocation?: boolean;
+  isLoadingSuggestions?: boolean;
 }
 
 function BookingField({
@@ -1476,8 +2031,12 @@ function BookingField({
   showLocationIcon,
   onLocationIconClick,
   isLoadingLocation,
+  isLoadingSuggestions,
   ...props
 }: BookingFieldProps) {
+  const listboxId = `${props.name ?? 'location'}-suggestions`;
+  const showDropdown = suggestions.length > 0 || isLoadingSuggestions;
+
   return (
     <div className="relative">
       <div
@@ -1503,8 +2062,8 @@ function BookingField({
           autoCapitalize="off"
           spellCheck={false}
           aria-invalid={!!error}
-          aria-autocomplete={suggestions.length > 0 ? 'list' : undefined}
-          aria-expanded={suggestions.length > 0 ? true : undefined}
+          aria-autocomplete={showDropdown ? 'list' : undefined}
+          aria-controls={showDropdown ? listboxId : undefined}
           placeholder={error || props.placeholder}
           className={cn(
             'min-h-11 w-full min-w-0 bg-transparent text-base font-medium text-zinc-950 outline-none placeholder:text-zinc-400',
@@ -1535,33 +2094,110 @@ function BookingField({
           </button>
         )}
       </div>
-      {suggestions.length > 0 && onSuggestionSelect && (
+      {showDropdown && (
         <div
+          id={listboxId}
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-[18px] border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
+          className="dashboard-scrollbar absolute left-0 right-0 top-[calc(100%+8px)] z-40 max-h-[min(18rem,52vh)] overflow-y-auto rounded-[18px] border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
         >
-          {suggestions.map((cityName, index) => (
+          {isLoadingSuggestions ? (
+            <div className="flex min-h-10 items-center gap-2 rounded-[14px] px-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Searching addresses...
+            </div>
+          ) : null}
+          {!isLoadingSuggestions && suggestions.length === 0 ? (
+            <div className="min-h-10 rounded-[14px] px-3 py-2.5 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+              No addresses found
+            </div>
+          ) : null}
+          {suggestions.map((suggestion, index) => (
             <button
-              key={cityName}
+              key={suggestion.id}
               type="button"
               role="option"
               aria-selected={index === highlightedSuggestionIndex}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onSuggestionSelect(cityName)}
+              onClick={() => onSuggestionSelect?.(suggestion)}
               className={cn(
-                'flex min-h-10 w-full items-center rounded-[14px] px-3 text-left text-sm font-semibold text-zinc-950 transition-colors',
+                'flex min-h-12 w-full flex-col justify-center rounded-[14px] px-3 py-2 text-left text-sm font-semibold text-zinc-950 transition-colors touch-manipulation',
                 'hover:bg-zinc-100 focus:bg-zinc-100 focus:outline-none',
                 'dark:text-white dark:hover:bg-zinc-900 dark:focus:bg-zinc-900',
                 index === highlightedSuggestionIndex && 'bg-zinc-100 dark:bg-zinc-900'
               )}
             >
-              {cityName}
+              <span className="w-full truncate">{suggestion.addressLine1 || suggestion.formatted}</span>
+              {suggestion.addressLine2 ? (
+                <span className="mt-0.5 w-full truncate text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  {suggestion.addressLine2}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+async function fetchGeoapifyAddressSuggestions(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
+  const params = new URLSearchParams({
+    text: query,
+    format: 'json',
+    limit: '6',
+    lang: 'en',
+    filter: 'countrycode:in',
+    apiKey: GEOAPIFY_API_KEY,
+  });
+
+  const response = await fetch(`https://api.geoapify.com/v1/geocode/autocomplete?${params.toString()}`, {
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error('Address autocomplete failed');
+  }
+
+  const data = (await response.json()) as GeoapifyAutocompleteResponse;
+
+  return (data.results ?? [])
+    .map((result, index) => createGeoapifyAddressSuggestion(result, index))
+    .filter((suggestion): suggestion is AddressSuggestion => Boolean(suggestion));
+}
+
+function createGeoapifyAddressSuggestion(
+  result: GeoapifyAutocompleteResult,
+  index: number
+): AddressSuggestion | null {
+  const formatted = result.formatted?.trim();
+  const latitude = typeof result.lat === 'number' ? result.lat : null;
+  const longitude = typeof result.lon === 'number' ? result.lon : null;
+
+  if (!formatted) {
+    return null;
+  }
+
+  return {
+    id: result.place_id || `${formatted}-${index}`,
+    formatted,
+    latitude,
+    longitude,
+    placeId: result.place_id ?? '',
+    addressLine1: result.address_line1 || result.city || formatted,
+    addressLine2: result.address_line2 || [result.state, result.country].filter(Boolean).join(', '),
+  };
+}
+
+function createManualAddressSuggestion(cityName: string): AddressSuggestion {
+  return {
+    id: `manual-${cityName}`,
+    formatted: cityName,
+    latitude: null,
+    longitude: null,
+    placeId: '',
+    addressLine1: cityName,
+    addressLine2: 'Fixed route city',
+  };
 }
 
 function buildPickupDateTime(date: string, time: string) {
@@ -1578,6 +2214,77 @@ function formatMoney(value: number) {
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function getRideFare(priceQuote: FixedRoutePrice, ride: RideOption) {
+  if (ride === 'SUV') {
+    return priceQuote.sedanPrice + 1000;
+  }
+
+  if (ride === 'VAN') {
+    return priceQuote.sedanPrice + 1800;
+  }
+
+  return priceQuote.sedanPrice;
+}
+
+function buildRideOptions(priceQuote: FixedRoutePrice | null): RideSelectionOption[] {
+  if (!priceQuote) {
+    return [];
+  }
+
+  return [
+    {
+      value: 'SEDAN',
+      name: 'Miles Eco',
+      passengers: 4,
+      badge: 'Best value',
+      description: 'Everyday sedan for simple city-to-city rides.',
+      eta: '8 min',
+      fare: getRideFare(priceQuote, 'SEDAN'),
+    },
+    {
+      value: 'SUV',
+      name: 'Miles S',
+      passengers: 4,
+      badge: 'Comfort ride',
+      description: 'Extra comfort and boot space for your trip.',
+      eta: '10 min',
+      fare: getRideFare(priceQuote, 'SUV'),
+    },
+    {
+      value: 'VAN',
+      name: 'Miles XL',
+      passengers: 6,
+      badge: 'Larger vehicle',
+      description: 'Roomier option for families and larger groups.',
+      eta: '12 min',
+      fare: getRideFare(priceQuote, 'VAN'),
+    },
+  ];
+}
+
+function formatDistance(distanceKm: number | null) {
+  if (distanceKm === null) {
+    return 'Pending';
+  }
+
+  return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
+}
+
+function formatTripDuration(durationMinutes: number | null) {
+  if (durationMinutes === null) {
+    return 'Pending';
+  }
+
+  if (durationMinutes < 60) {
+    return `${durationMinutes} min`;
+  }
+
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+
+  return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
 }
 
 function formatPickupDateTime(value: string) {
