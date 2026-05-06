@@ -74,7 +74,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="bg-white pb-20 pt-8 dark:bg-zinc-950 sm:pb-24 lg:pt-16">
+      <section id="help" className="bg-white pb-20 pt-8 dark:bg-zinc-950 sm:pb-24 lg:pt-16">
         <div className="mx-auto grid w-full max-w-[1536px] gap-5 px-4 md:px-5 sm:grid-cols-2 lg:grid-cols-4 lg:px-8">
           {features.map((feature) => (
             <article

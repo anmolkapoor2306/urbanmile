@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, FormEvent, useEffect, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   CalendarClock,
@@ -29,6 +30,7 @@ import {
 
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
+const RIDE_OPTIONS_DRAFT_KEY = 'urbanmiles_ride_options_draft';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 
 const bookingSchema = z.object({
@@ -57,7 +59,7 @@ const bookingSchema = z.object({
 type BookingFormData = z.infer<typeof bookingSchema>;
 type BookingMode = 'ONE_WAY' | 'ROUND_TRIP';
 type PickupTiming = 'NOW' | 'LATER';
-type RideOption = 'SEDAN' | 'SUV' | 'VAN';
+type RideOption = 'SEDAN' | 'VAN';
 type LocationFieldName = 'pickupLocation' | 'dropoffLocation';
 type BookingErrorField = keyof BookingFormData | 'returnDateTime';
 type BookingAuthProvider = 'google' | 'phone_guest';
@@ -100,6 +102,17 @@ type RoutePreviewState = {
   isLoading: boolean;
   error: string | null;
 };
+type RideOptionsDraft = {
+  formData: BookingFormData;
+  bookingMode: BookingMode;
+  pickupTiming: PickupTiming;
+  pickupDate: string;
+  pickupTime: string;
+  returnDate: string;
+  returnTime: string;
+  selectedRide: RideOption;
+  priceQuote: FixedRoutePrice;
+};
 
 type CustomerProfile = {
   fullName: string;
@@ -111,9 +124,12 @@ type CustomerProfile = {
 interface BookingFormProps {
   onBookingSuccess?: () => void;
   onReset?: () => void;
+  mode?: 'search' | 'ride-options';
 }
 
-export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
+export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: BookingFormProps) {
+  const router = useRouter();
+  const isRideOptionsPage = mode === 'ride-options';
   const [isSuccess, setIsSuccess] = useState(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   const pickupTimingMenuRef = useRef<HTMLDivElement>(null);
@@ -222,6 +238,56 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       fareAmount: nextFare,
     }));
   };
+
+  const openRideOptionsPage = (draft: RideOptionsDraft) => {
+    window.sessionStorage.setItem(RIDE_OPTIONS_DRAFT_KEY, JSON.stringify(draft));
+    router.push('/choose-ride');
+  };
+
+  useEffect(() => {
+    if (!isRideOptionsPage) {
+      return;
+    }
+
+    const savedDraft = window.sessionStorage.getItem(RIDE_OPTIONS_DRAFT_KEY);
+    if (!savedDraft) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(savedDraft) as Partial<RideOptionsDraft>;
+      if (!parsed.formData || !parsed.priceQuote) {
+        return;
+      }
+
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFormData(parsed.formData);
+      pickupField.setResolvedLocation(parsed.formData.pickupLocation, {
+        latitude: parsed.formData.pickupLatitude ?? null,
+        longitude: parsed.formData.pickupLongitude ?? null,
+        placeId: parsed.formData.pickupPlaceId,
+        source: parsed.formData.pickupLocationSource ?? 'manual',
+      });
+      dropoffField.setResolvedLocation(parsed.formData.dropoffLocation, {
+        latitude: parsed.formData.dropoffLatitude ?? null,
+        longitude: parsed.formData.dropoffLongitude ?? null,
+        placeId: parsed.formData.dropoffPlaceId,
+        source: parsed.formData.dropoffLocationSource ?? 'manual',
+      });
+      setBookingMode(parsed.bookingMode ?? 'ONE_WAY');
+      setPickupTiming(parsed.pickupTiming ?? 'NOW');
+      setPickupDate(parsed.pickupDate ?? '');
+      setPickupTime(parsed.pickupTime ?? '');
+      setReturnDate(parsed.returnDate ?? '');
+      setReturnTime(parsed.returnTime ?? '');
+      setSelectedRide(parsed.selectedRide === 'VAN' ? 'VAN' : 'SEDAN');
+      setPriceQuote(parsed.priceQuote);
+    } catch {
+      window.sessionStorage.removeItem(RIDE_OPTIONS_DRAFT_KEY);
+    }
+    // The location field helpers are stable for the lifetime of this mounted booking flow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRideOptionsPage]);
 
   useEffect(() => {
     if (!activeLocationField) {
@@ -832,14 +898,26 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       return;
     }
 
-    setSelectedRide('SEDAN');
-    setPriceQuote(fixedRoutePrice);
-    setFormData((prev) => ({
-      ...prev,
+    const nextFormData: BookingFormData = {
+      ...formData,
       pickupDateTime: new Date().toISOString(),
       carType: 'SEDAN',
       fareAmount: getRideFare(fixedRoutePrice, 'SEDAN'),
-    }));
+    };
+
+    setSelectedRide('SEDAN');
+    setFormData(nextFormData);
+    openRideOptionsPage({
+      formData: nextFormData,
+      bookingMode,
+      pickupTiming,
+      pickupDate,
+      pickupTime,
+      returnDate,
+      returnTime,
+      selectedRide: 'SEDAN',
+      priceQuote: fixedRoutePrice,
+    });
   };
 
   const handleConfirmDateTime = () => {
@@ -866,15 +944,33 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
 
     const fixedRoutePrice = getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation);
 
-    setShowDateTimeModal(false);
-    setSelectedRide('SEDAN');
-    setPriceQuote(fixedRoutePrice || null);
-    setFormData((prev) => ({
-      ...prev,
+    if (!fixedRoutePrice) {
+      setShowDateTimeModal(false);
+      setRouteMessage(UNAVAILABLE_ROUTE_MESSAGE);
+      return;
+    }
+
+    const nextFormData: BookingFormData = {
+      ...formData,
       pickupDateTime,
       carType: 'SEDAN',
-      fareAmount: fixedRoutePrice ? getRideFare(fixedRoutePrice, 'SEDAN') : undefined,
-    }));
+      fareAmount: getRideFare(fixedRoutePrice, 'SEDAN'),
+    };
+
+    setShowDateTimeModal(false);
+    setSelectedRide('SEDAN');
+    setFormData(nextFormData);
+    openRideOptionsPage({
+      formData: nextFormData,
+      bookingMode,
+      pickupTiming,
+      pickupDate,
+      pickupTime,
+      returnDate,
+      returnTime,
+      selectedRide: 'SEDAN',
+      priceQuote: fixedRoutePrice,
+    });
   };
 
   const handleBookNow = async () => {
@@ -1010,6 +1106,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       setPriceQuote(null);
       setRouteMessage(null);
       setBookingError(null);
+      window.sessionStorage.removeItem(RIDE_OPTIONS_DRAFT_KEY);
       onBookingSuccess?.();
       pickupField.reset();
       dropoffField.reset();
@@ -1048,6 +1145,115 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       setIsSubmitting(false);
     }
   };
+
+  if (isRideOptionsPage) {
+    if (isSuccess) {
+      return (
+        <div className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-3xl items-center px-4 py-10">
+          <div
+            ref={confirmationRef}
+            className="flex w-full flex-col items-center justify-center rounded-[26px] border border-amber-100 bg-amber-50 px-8 py-12 text-center shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20"
+          >
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-white text-amber-600 shadow-sm dark:bg-zinc-900">
+              <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="mb-3 text-2xl font-bold text-zinc-950 dark:text-zinc-100">
+              Request received
+            </h3>
+            <p className="max-w-md text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
+              We have your route details. Our team will confirm availability and pricing shortly.
+            </p>
+            {bookingReferences.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {bookingReferences.map((reference) => (
+                  <p
+                    key={reference}
+                    className="rounded-full bg-white px-4 py-2 text-sm font-bold text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    Booking ID: {reference}
+                  </p>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="mt-8 inline-flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+            >
+              Start another search
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (!priceQuote) {
+      return (
+        <div className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-2xl items-center px-4 py-10">
+          <div className="w-full rounded-[28px] border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <h1 className="text-2xl font-black text-zinc-950 dark:text-white">Choose a ride</h1>
+            <p className="mt-3 text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
+              Your ride search has expired. Start a new route search to see available rides.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push('/#ride')}
+              className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+            >
+              Back to Ride
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <RideSelectionView
+        authError={authError}
+        authStep={authStep}
+        bookingError={bookingError}
+        bookingMode={bookingMode}
+        customerProfile={customerProfile}
+        devOtpCode={devOtpCode}
+        finalPrice={finalPrice}
+        formData={formData}
+        isAuthBusy={isAuthBusy}
+        isSubmitting={isSubmitting}
+        onBack={() => router.push('/#ride')}
+        onBookNow={handleBookNow}
+        onContinueAsGuest={handleContinueAsGuest}
+        onContinueWithGoogle={handleContinueWithGoogle}
+        onInputChange={handleInputChange}
+        onProfileChange={handleProfileChange}
+        onRideSelect={handleRideSelect}
+        onSendOtp={handleSendOtp}
+        onOtpCodeChange={(event) => {
+          setOtpCode(event.target.value);
+          setAuthError(null);
+        }}
+        onOtpPhoneChange={(event) => {
+          setOtpPhone(event.target.value);
+          setPhoneVerified(false);
+          setPhoneVerificationToken('');
+          setVerifiedPhone('');
+          setAuthError(null);
+        }}
+        otpCode={otpCode}
+        otpPhone={otpPhone}
+        otpResendSeconds={otpResendSeconds}
+        otpSent={otpSent}
+        pickupDisplayTime={pickupDisplayTime}
+        pickupTiming={pickupTiming}
+        profileErrors={profileErrors}
+        returnDateTime={returnDateTime}
+        rideOptions={rideOptions}
+        selectedRide={selectedRide}
+        totalPrice={totalPrice}
+      />
+    );
+  }
 
   return (
     <>
@@ -1368,7 +1574,7 @@ export function BookingForm({ onBookingSuccess, onReset }: BookingFormProps) {
       </div>
     )}
 
-    {priceQuote && (
+    {isRideOptionsPage && priceQuote && (
       <RideSelectionView
         authError={authError}
         authStep={authStep}
@@ -1502,9 +1708,9 @@ function RideSelectionView({
     rideOptions.find((option) => option.value === selectedRide) ?? rideOptions[0];
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[65px] z-40 overflow-y-auto overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white lg:overflow-hidden">
-      <div className="grid min-h-full grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
-        <section className="dashboard-scrollbar order-2 flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:order-1 lg:overflow-y-auto">
+    <main className="min-h-[calc(100vh-72px)] overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white">
+      <div className="grid min-h-[calc(100vh-72px)] grid-cols-1 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
+        <section className="order-2 flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:order-1">
           <div className="flex-1 space-y-5 px-4 py-5 sm:px-6">
             <button
               type="button"
@@ -1756,7 +1962,7 @@ function RideSelectionView({
           />
         </section>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -2217,10 +2423,6 @@ function formatMoney(value: number) {
 }
 
 function getRideFare(priceQuote: FixedRoutePrice, ride: RideOption) {
-  if (ride === 'SUV') {
-    return priceQuote.sedanPrice + 1000;
-  }
-
   if (ride === 'VAN') {
     return priceQuote.sedanPrice + 1800;
   }
@@ -2242,15 +2444,6 @@ function buildRideOptions(priceQuote: FixedRoutePrice | null): RideSelectionOpti
       description: 'Everyday sedan for simple city-to-city rides.',
       eta: '8 min',
       fare: getRideFare(priceQuote, 'SEDAN'),
-    },
-    {
-      value: 'SUV',
-      name: 'Miles S',
-      passengers: 4,
-      badge: 'Comfort ride',
-      description: 'Extra comfort and boot space for your trip.',
-      eta: '10 min',
-      fare: getRideFare(priceQuote, 'SUV'),
     },
     {
       value: 'VAN',
