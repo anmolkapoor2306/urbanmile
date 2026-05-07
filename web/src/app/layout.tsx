@@ -24,18 +24,6 @@ export default function RootLayout({
       suppressHydrationWarning
     >
     <body className="min-h-full flex flex-col overflow-x-hidden bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
-      <script dangerouslySetInnerHTML={{
-        __html: `
-          (function(){
-            try{
-              var stored = localStorage.getItem('urbanmiles-theme');
-              if(stored === 'light'){
-                document.documentElement.classList.remove('dark');
-              }
-            } catch(e){}
-          })();
-        `,
-      }} />
       <ThemeProvider>{children}</ThemeProvider>
     </body>
     </html>

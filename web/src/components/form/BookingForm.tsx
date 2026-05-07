@@ -25,6 +25,7 @@ import { useBookingLocationField } from '@/hooks/useBookingLocationField';
 import {
   getFixedCitySuggestions,
   getFixedRoutePrice,
+  getOutstationVehicleFare,
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
 
@@ -112,6 +113,17 @@ type RideOptionsDraft = {
   returnTime: string;
   selectedRide: RideOption;
   priceQuote: FixedRoutePrice;
+};
+type PublicOutstationQuoteResponse = {
+  success?: boolean;
+  data?: {
+    pickupCity: string | null;
+    dropoffCity: string | null;
+    routeId: string | null;
+    sedanPrice: number | null;
+    suvMarkup: number | null;
+    customPricingRequired: boolean;
+  };
 };
 
 type CustomerProfile = {
@@ -885,7 +897,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation);
+    const fixedRoutePrice = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
 
     if (!fixedRoutePrice) {
       setPriceQuote(null);
@@ -920,7 +932,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     });
   };
 
-  const handleConfirmDateTime = () => {
+  const handleConfirmDateTime = async () => {
     const pickupDateTime =
       pickupTiming === 'NOW' ? new Date().toISOString() : buildPickupDateTime(pickupDate, pickupTime);
 
@@ -942,7 +954,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = getFixedRoutePrice(formData.pickupLocation, formData.dropoffLocation);
+    const fixedRoutePrice = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
 
     if (!fixedRoutePrice) {
       setShowDateTimeModal(false);
@@ -1708,10 +1720,10 @@ function RideSelectionView({
     rideOptions.find((option) => option.value === selectedRide) ?? rideOptions[0];
 
   return (
-    <main className="min-h-[calc(100vh-72px)] overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <div className="grid min-h-[calc(100vh-72px)] grid-cols-1 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
-        <section className="order-2 flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:order-1">
-          <div className="flex-1 space-y-5 px-4 py-5 sm:px-6">
+    <main className="min-h-[calc(100vh-72px)] overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white lg:h-full lg:min-h-0 lg:overflow-hidden">
+      <div className="grid min-h-[calc(100vh-72px)] grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
+        <section className="order-2 flex min-h-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:order-1 lg:h-full">
+          <div className="dashboard-scrollbar flex-1 space-y-5 px-4 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto">
             <button
               type="button"
               onClick={onBack}
@@ -1951,7 +1963,7 @@ function RideSelectionView({
           </div>
         </section>
 
-        <section className="order-1 min-h-[360px] bg-zinc-200 dark:bg-zinc-900 lg:order-2 lg:min-h-0">
+        <section className="order-1 min-h-[360px] bg-zinc-200 dark:bg-zinc-900 lg:order-2 lg:h-full lg:min-h-0 lg:overflow-hidden">
           <RideMapPreview
             dropoffLatitude={formData.dropoffLatitude ?? null}
             dropoffLongitude={formData.dropoffLongitude ?? null}
@@ -2406,6 +2418,45 @@ function createManualAddressSuggestion(cityName: string): AddressSuggestion {
   };
 }
 
+async function getRoutePriceQuote(pickupLocation: string, dropoffLocation: string): Promise<FixedRoutePrice | null> {
+  try {
+    const response = await fetch('/api/pricing/outstation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pickupLocation, dropoffLocation }),
+    });
+    const data = (await response.json()) as PublicOutstationQuoteResponse;
+    const quote = data.data;
+
+    if (
+      response.ok &&
+      quote &&
+      !quote.customPricingRequired &&
+      typeof quote.sedanPrice === 'number'
+    ) {
+      return {
+        pickupCity: quote.pickupCity ?? normalizeRouteLabel(pickupLocation),
+        dropoffCity: quote.dropoffCity ?? normalizeRouteLabel(dropoffLocation),
+        sedanPrice: quote.sedanPrice,
+        suvMarkup: quote.suvMarkup ?? 1000,
+        routeId: quote.routeId,
+      };
+    }
+
+    if (quote?.customPricingRequired) {
+      return null;
+    }
+  } catch {
+    // Static fallback keeps existing fixed-route behavior available if the quote API is offline.
+  }
+
+  return getFixedRoutePrice(pickupLocation, dropoffLocation);
+}
+
+function normalizeRouteLabel(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function buildPickupDateTime(date: string, time: string) {
   if (!date || !time) {
     return '';
@@ -2423,11 +2474,7 @@ function formatMoney(value: number) {
 }
 
 function getRideFare(priceQuote: FixedRoutePrice, ride: RideOption) {
-  if (ride === 'VAN') {
-    return priceQuote.sedanPrice + 1800;
-  }
-
-  return priceQuote.sedanPrice;
+  return getOutstationVehicleFare(priceQuote.sedanPrice, ride, priceQuote.suvMarkup ?? 1000);
 }
 
 function buildRideOptions(priceQuote: FixedRoutePrice | null): RideSelectionOption[] {

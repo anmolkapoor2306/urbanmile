@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "seed:test-bookings": "jiti scripts/seed-test-bookings.ts",
-    "seed:demo-drivers": "jiti scripts/seed-demo-drivers.ts"
+    "seed:demo-drivers": "jiti scripts/seed-demo-drivers.ts",
+    "seed:outstation-routes": "jiti scripts/seed-outstation-routes.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

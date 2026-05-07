@@ -188,6 +188,28 @@ model Vehicle {
   @@index([status])
 }
 
+model OutstationRoute {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  originCity         String
+  destinationCity    String
+  originAliases      String[] @default([])
+  destinationAliases String[] @default([])
+  sedanFare          Decimal  @db.Decimal(10, 2)
+  suvMarkup          Decimal  @default(1000) @db.Decimal(10, 2)
+  estimatedKm        Decimal? @db.Decimal(8, 2)
+  suggestedFare      Decimal? @db.Decimal(10, 2)
+  isActive           Boolean  @default(true)
+  isBidirectional    Boolean  @default(true)
+  notes              String?
+  createdAt          DateTime @default(now()) @db.Timestamp(6)
+  updatedAt          DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@unique([originCity, destinationCity])
+  @@index([originCity])
+  @@index([destinationCity])
+  @@index([isActive])
+}
+
 enum BookingStatus {
   NEW
   CONFIRMED

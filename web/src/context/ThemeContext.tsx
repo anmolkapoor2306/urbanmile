@@ -40,8 +40,12 @@ function subscribeToTheme(onStoreChange: () => void) {
 }
 
 function getThemeSnapshot(storageKey: string, defaultTheme: Theme) {
-  const storedTheme = window.localStorage.getItem(storageKey);
-  return isTheme(storedTheme) ? storedTheme : defaultTheme;
+  try {
+    const stored = localStorage.getItem(storageKey);
+    return isTheme(stored) ? stored : defaultTheme;
+  } catch {
+    return defaultTheme;
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
