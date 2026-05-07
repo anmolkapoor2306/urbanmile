@@ -191,7 +191,9 @@ model Vehicle {
 model OutstationRoute {
   id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   originCity         String
+  originState        String?
   destinationCity    String
+  destinationState   String?
   originAliases      String[] @default([])
   destinationAliases String[] @default([])
   sedanFare          Decimal  @db.Decimal(10, 2)

@@ -12,15 +12,15 @@ export default async function OutstationPricingPage() {
     redirect('/admin/login');
   }
 
-  let routes: any[] = [];
+  let routes: Awaited<ReturnType<typeof prisma.outstationRoute.findMany>> = [];
   let databaseError: string | null = null;
 
   try {
     routes = await prisma.outstationRoute.findMany({
       orderBy: [{ isActive: 'desc' }, { originCity: 'asc' }, { destinationCity: 'asc' }],
     });
-  } catch (error: any) {
-    databaseError = error?.message || 'Could not load outstation routes';
+  } catch (error: unknown) {
+    databaseError = error instanceof Error ? error.message : 'Could not load outstation routes';
     console.error('Failed to load outstation routes:', error);
   }
 

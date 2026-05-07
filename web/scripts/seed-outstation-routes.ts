@@ -23,6 +23,7 @@ async function main() {
         estimatedKm: route.estimatedKm,
         suggestedFare: calculateSuggestedFare(route.estimatedKm),
         isActive: route.isActive,
+        isBidirectional: route.isBidirectional,
         notes: route.notes,
       },
       create: {
@@ -35,6 +36,7 @@ async function main() {
         estimatedKm: route.estimatedKm,
         suggestedFare: calculateSuggestedFare(route.estimatedKm),
         isActive: route.isActive,
+        isBidirectional: route.isBidirectional,
         notes: route.notes,
       },
     });

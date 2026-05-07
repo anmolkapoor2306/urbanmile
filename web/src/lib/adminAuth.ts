@@ -52,6 +52,18 @@ export function requireAdminAuth(request: NextRequest): NextResponse | null {
   return null;
 }
 
+export async function requireCurrentAdminAuth(request?: NextRequest): Promise<NextResponse | null> {
+  if (request && isAdminAuthenticated(request.cookies)) {
+    return null;
+  }
+
+  if (await isCurrentAdminAuthenticated()) {
+    return null;
+  }
+
+  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+}
+
 export function checkAdminAuth(request: NextRequest): boolean {
   return isAdminAuthenticated(request.cookies);
 }

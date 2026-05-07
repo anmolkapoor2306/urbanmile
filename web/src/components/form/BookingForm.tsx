@@ -28,11 +28,17 @@ import {
   getOutstationVehicleFare,
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
+import {
+  cleanGeoapifyCityLocation,
+  formatCityStateDisplay,
+  getKnownIndianCityState,
+} from '@/lib/locationFormatting';
 
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
 const RIDE_OPTIONS_DRAFT_KEY = 'urbanmiles_ride_options_draft';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
+const CITY_RESULT_TYPES = new Set(['city', 'county', 'state', 'postcode', 'district', 'suburb', 'locality']);
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -73,6 +79,9 @@ type AddressSuggestion = {
   placeId: string;
   addressLine1: string;
   addressLine2: string;
+  city: string;
+  state: string;
+  displayName: string;
 };
 type GeoapifyAutocompleteResult = {
   formatted?: string;
@@ -82,8 +91,16 @@ type GeoapifyAutocompleteResult = {
   address_line1?: string;
   address_line2?: string;
   city?: string;
+  town?: string;
+  village?: string;
+  municipality?: string;
+  county?: string;
+  suburb?: string;
+  district?: string;
   state?: string;
+  state_code?: string;
   country?: string;
+  result_type?: string;
 };
 type GeoapifyAutocompleteResponse = {
   results?: GeoapifyAutocompleteResult[];
@@ -413,10 +430,10 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   };
 
   const handleLocationSuggestionSelect = (fieldName: LocationFieldName, suggestion: AddressSuggestion) => {
-    const formattedAddress = suggestion.formatted;
+    const selectedLocation = suggestion.displayName;
 
     if (fieldName === 'pickupLocation') {
-      pickupField.setResolvedLocation(formattedAddress, {
+      pickupField.setResolvedLocation(selectedLocation, {
         latitude: suggestion.latitude,
         longitude: suggestion.longitude,
         placeId: suggestion.placeId,
@@ -425,14 +442,14 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       setPickupLocationError(null);
       setFormData((prev) => ({
         ...prev,
-        pickupLocation: formattedAddress,
+        pickupLocation: selectedLocation,
         pickupLatitude: suggestion.latitude,
         pickupLongitude: suggestion.longitude,
         pickupPlaceId: suggestion.placeId,
         pickupLocationSource: 'manual',
       }));
     } else {
-      dropoffField.setResolvedLocation(formattedAddress, {
+      dropoffField.setResolvedLocation(selectedLocation, {
         latitude: suggestion.latitude,
         longitude: suggestion.longitude,
         placeId: suggestion.placeId,
@@ -440,7 +457,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       });
       setFormData((prev) => ({
         ...prev,
-        dropoffLocation: formattedAddress,
+        dropoffLocation: selectedLocation,
         dropoffLatitude: suggestion.latitude,
         dropoffLongitude: suggestion.longitude,
         dropoffPlaceId: suggestion.placeId,
@@ -2387,34 +2404,49 @@ function createGeoapifyAddressSuggestion(
   result: GeoapifyAutocompleteResult,
   index: number
 ): AddressSuggestion | null {
-  const formatted = result.formatted?.trim();
+  const resultType = result.result_type?.toLowerCase();
+  const isLikelyStreetAddress = Boolean(result.address_line1 && result.address_line1 !== result.city);
+  if (isLikelyStreetAddress && resultType && !CITY_RESULT_TYPES.has(resultType)) {
+    return null;
+  }
+
+  const location = cleanGeoapifyCityLocation(result);
   const latitude = typeof result.lat === 'number' ? result.lat : null;
   const longitude = typeof result.lon === 'number' ? result.lon : null;
 
-  if (!formatted) {
+  if (!location) {
     return null;
   }
 
   return {
-    id: result.place_id || `${formatted}-${index}`,
-    formatted,
+    id: result.place_id || `${location.displayName}-${index}`,
+    formatted: location.displayName,
     latitude,
     longitude,
     placeId: result.place_id ?? '',
-    addressLine1: result.address_line1 || result.city || formatted,
-    addressLine2: result.address_line2 || [result.state, result.country].filter(Boolean).join(', '),
+    addressLine1: location.city,
+    addressLine2: location.state,
+    city: location.city,
+    state: location.state,
+    displayName: location.displayName,
   };
 }
 
 function createManualAddressSuggestion(cityName: string): AddressSuggestion {
+  const state = getKnownIndianCityState(cityName);
+  const displayName = formatCityStateDisplay(cityName, state);
+
   return {
     id: `manual-${cityName}`,
-    formatted: cityName,
+    formatted: displayName,
     latitude: null,
     longitude: null,
     placeId: '',
     addressLine1: cityName,
-    addressLine2: 'Fixed route city',
+    addressLine2: state || 'Fixed route city',
+    city: cityName,
+    state,
+    displayName,
   };
 }
 

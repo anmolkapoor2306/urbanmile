@@ -22,11 +22,47 @@ const checks: PricingCheck[] = [
     expected: 6300,
   },
   {
+    label: 'Delhi City to Jalandhar Eco',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Delhi City',
+      dropoffLocation: 'Jalandhar',
+    }).ecoPrice,
+    expected: 6300,
+  },
+  {
+    label: 'Jalandhar to Delhi City XL',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Jalandhar',
+      dropoffLocation: 'Delhi City',
+    }).xlPrice,
+    expected: 7300,
+  },
+  {
+    label: 'Delhi City to Jalandhar XL',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Delhi City',
+      dropoffLocation: 'Jalandhar',
+    }).xlPrice,
+    expected: 7300,
+  },
+  {
     label: 'Jalandhar to Delhi Airport Eco',
     actual: quoteOutstationRouteFromRoutes({
       routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
       pickupLocation: 'Jal',
       dropoffLocation: 'IGI Airport',
+    }).ecoPrice,
+    expected: 6000,
+  },
+  {
+    label: 'Delhi Airport to Jalandhar Eco',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Delhi Airport',
+      dropoffLocation: 'Jalandhar',
     }).ecoPrice,
     expected: 6000,
   },
@@ -38,6 +74,24 @@ const checks: PricingCheck[] = [
       dropoffLocation: 'Chd',
     }).ecoPrice,
     expected: 2500,
+  },
+  {
+    label: 'Chandigarh to Jalandhar Eco',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Chandigarh',
+      dropoffLocation: 'Jalandhar',
+    }).ecoPrice,
+    expected: 2500,
+  },
+  {
+    label: 'Chandigarh to Jalandhar direction',
+    actual: quoteOutstationRouteFromRoutes({
+      routes: JALANDHAR_OUTSTATION_SEED_ROUTES,
+      pickupLocation: 'Chandigarh',
+      dropoffLocation: 'Jalandhar',
+    }).matchedDirection,
+    expected: 'inverse',
   },
   {
     label: 'Jalandhar to Chandigarh XL',

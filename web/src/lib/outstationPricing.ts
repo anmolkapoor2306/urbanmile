@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { normalizeIndianStateName, splitCityStateDisplay } from '@/lib/locationFormatting';
 
 export const OUTSTATION_SUGGESTED_RATE_PER_KM = 16;
 export const DEFAULT_OUTSTATION_SUV_MARKUP = 1000;
@@ -15,7 +16,9 @@ export type TripClassification = {
 export type OutstationRouteLike = {
   id?: string;
   originCity: string;
+  originState?: string | null;
   destinationCity: string;
+  destinationState?: string | null;
   originAliases: string[];
   destinationAliases: string[];
   sedanFare: number | Prisma.Decimal;
@@ -140,14 +143,30 @@ const KNOWN_CANONICAL_CITIES = Array.from(
 ).sort((a, b) => b.length - a.length);
 
 export function normalizePricingCity(value: string): string {
-  const normalized = value
+  const cityValue = value.includes(',') ? splitCityStateDisplay(value).city : value;
+  const normalized = cityValue
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\b(india|punjab)\b/g, ' ')
+    .replace(/\b(india|punjab|haryana|rajasthan|uttar pradesh|chandigarh)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
   return OUTSTATION_CITY_ALIASES[normalized] ?? normalized;
+}
+
+export function formatPricingCityTitle(value: string): string {
+  const normalizedCity = normalizePricingCity(value);
+  const knownCity = OUTSTATION_CITY_SUGGESTIONS.find((city) => normalizePricingCity(city) === normalizedCity);
+
+  if (knownCity) {
+    return knownCity;
+  }
+
+  return normalizedCity
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function containsLocationToken(input: string, token: string) {
@@ -218,6 +237,58 @@ function routeMatchesCity(city: string | null, routeCity: string, routeAliases: 
   return routeCityCandidates(routeCity, routeAliases).includes(city);
 }
 
+function detectCityFromRouteList(value: string, routes: OutstationRouteLike[]) {
+  const normalizedAddress = normalizePricingCity(value);
+  const normalizedCityPart = normalizePricingCity(splitCityStateDisplay(value).city);
+
+  if (!normalizedAddress && !normalizedCityPart) {
+    return null;
+  }
+
+  const routeCities = Array.from(
+    new Set(routes.flatMap((route) => [
+      ...routeCityCandidates(route.originCity, route.originAliases),
+      ...routeCityCandidates(route.destinationCity, route.destinationAliases),
+    ]))
+  ).sort((left, right) => right.length - left.length);
+
+  return routeCities.find((city) => (
+    containsLocationToken(normalizedCityPart, city) ||
+    containsLocationToken(normalizedAddress, city)
+  )) ?? null;
+}
+
+function detectCityForRouteQuote(value: string, detectedCity: string | null, routes: OutstationRouteLike[]) {
+  if (detectedCity) {
+    return detectedCity;
+  }
+
+  const routeCity = detectCityFromRouteList(value, routes);
+  if (routeCity) {
+    return routeCity;
+  }
+
+  const parsedLocation = splitCityStateDisplay(value);
+  return value.includes(',') && parsedLocation.city ? normalizePricingCity(parsedLocation.city) : null;
+}
+
+function getRouteMatchDirection(route: OutstationRouteLike, pickupCity: string | null, dropoffCity: string | null) {
+  const isForwardMatch =
+    routeMatchesCity(pickupCity, route.originCity, route.originAliases) &&
+    routeMatchesCity(dropoffCity, route.destinationCity, route.destinationAliases);
+
+  if (isForwardMatch) {
+    return 'forward' as const;
+  }
+
+  const isInverseMatch =
+    route.isBidirectional !== false &&
+    routeMatchesCity(pickupCity, route.destinationCity, route.destinationAliases) &&
+    routeMatchesCity(dropoffCity, route.originCity, route.originAliases);
+
+  return isInverseMatch ? 'inverse' as const : null;
+}
+
 function toNumber(value: number | Prisma.Decimal | null | undefined) {
   if (value === null || value === undefined) {
     return null;
@@ -250,52 +321,67 @@ export function quoteOutstationRouteFromRoutes({
   distanceKm?: number | null;
 }): OutstationRoutePricingResult {
   const classification = classifyTripType({ pickupLocation, dropoffLocation, distanceKm });
+  const routePickupCity = detectCityForRouteQuote(pickupLocation, classification.pickupCity, routes);
+  const routeDropoffCity = detectCityForRouteQuote(dropoffLocation, classification.dropoffCity, routes);
+  const routeClassification: TripClassification = {
+    tripType: routePickupCity && routeDropoffCity && routePickupCity !== routeDropoffCity
+      ? 'outstation'
+      : classification.tripType,
+    pickupCity: routePickupCity,
+    dropoffCity: routeDropoffCity,
+  };
 
-  if (classification.tripType !== 'outstation') {
+  if (routeClassification.tripType !== 'outstation') {
     return {
-      ...classification,
+      ...routeClassification,
       routeId: null,
       sedanPrice: null,
       ecoPrice: null,
       xlPrice: null,
       suvMarkup: null,
+      matchedDirection: null,
       customPricingRequired: false,
     };
   }
 
-  const activeRoute = routes.find((route) => {
-    if (!route.isActive) {
-      return false;
+  const routeMatch = routes.reduce<{
+    route: OutstationRouteLike;
+    matchedDirection: 'forward' | 'inverse';
+  } | null>((match, route) => {
+    if (match || !route.isActive) {
+      return match;
     }
 
-    return (
-      routeMatchesCity(classification.pickupCity, route.originCity, route.originAliases) &&
-      routeMatchesCity(classification.dropoffCity, route.destinationCity, route.destinationAliases)
-    );
-  });
+    const matchedDirection = getRouteMatchDirection(route, routeClassification.pickupCity, routeClassification.dropoffCity);
 
-  if (!activeRoute) {
+    return matchedDirection ? { route, matchedDirection } : null;
+  }, null);
+
+  if (!routeMatch) {
     return {
-      ...classification,
+      ...routeClassification,
       routeId: null,
       sedanPrice: null,
       ecoPrice: null,
       xlPrice: null,
       suvMarkup: null,
+      matchedDirection: null,
       customPricingRequired: true,
     };
   }
 
+  const activeRoute = routeMatch.route;
   const sedanPrice = toNumber(activeRoute.sedanFare) ?? 0;
   const suvMarkup = toNumber(activeRoute.suvMarkup) ?? DEFAULT_OUTSTATION_SUV_MARKUP;
 
   return {
-    ...classification,
+    ...routeClassification,
     routeId: activeRoute.id ?? null,
     sedanPrice,
     ecoPrice: getOutstationVehicleFare(sedanPrice, 'MILES_ECO', suvMarkup),
     xlPrice: getOutstationVehicleFare(sedanPrice, 'MILES_XL', suvMarkup),
     suvMarkup,
+    matchedDirection: routeMatch.matchedDirection,
     customPricingRequired: false,
   };
 }
@@ -305,8 +391,10 @@ export function serializeOutstationRoute(route: OutstationRouteLike) {
 
   return {
     id: route.id ?? '',
-    originCity: route.originCity,
-    destinationCity: route.destinationCity,
+    originCity: formatPricingCityTitle(route.originCity),
+    originState: normalizeIndianStateName(route.originState),
+    destinationCity: formatPricingCityTitle(route.destinationCity),
+    destinationState: normalizeIndianStateName(route.destinationState),
     originAliases: route.originAliases,
     destinationAliases: route.destinationAliases,
     sedanFare: toNumber(route.sedanFare) ?? 0,
@@ -314,6 +402,7 @@ export function serializeOutstationRoute(route: OutstationRouteLike) {
     estimatedKm,
     suggestedFare: toNumber(route.suggestedFare) ?? calculateSuggestedFare(estimatedKm),
     isActive: route.isActive,
+    isBidirectional: route.isBidirectional,
     notes: route.notes ?? '',
     createdAt: route.createdAt instanceof Date ? route.createdAt.toISOString() : route.createdAt ?? '',
     updatedAt: route.updatedAt instanceof Date ? route.updatedAt.toISOString() : route.updatedAt ?? '',
