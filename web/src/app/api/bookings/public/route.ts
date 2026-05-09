@@ -15,7 +15,10 @@ import {
   verifyPhoneToken,
 } from '@/lib/customerAuth';
 import { z } from 'zod';
-import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
+import {
+  bookingLocationMetadataSchema,
+  toPrismaBookingLocationSource,
+} from '@/lib/bookingLocation';
 
 const publicBookingSelect = {
   publicBookingId: true,
@@ -206,14 +209,6 @@ export async function POST(request: NextRequest) {
         email: email || '',
         phone: normalizedPhone,
         customerId: customer.id,
-        pickupLatitude: pickupLatitude ?? null,
-        pickupLongitude: pickupLongitude ?? null,
-        pickupPlaceId: pickupPlaceId || null,
-        pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
-        dropoffLatitude: dropoffLatitude ?? null,
-        dropoffLongitude: dropoffLongitude ?? null,
-        dropoffPlaceId: dropoffPlaceId || null,
-        dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
         carType,
         fareAmount: legPrice,
         specialInstructions: specialInstructions || null,
@@ -228,6 +223,8 @@ export async function POST(request: NextRequest) {
         pickup,
         dropoff,
         pickupDateTime,
+        pickupCoords,
+        dropoffCoords,
       }: {
         id: string;
         bookingReference: string;
@@ -235,6 +232,8 @@ export async function POST(request: NextRequest) {
         pickup: string;
         dropoff: string;
         pickupDateTime: Date;
+        pickupCoords: LocationPersistenceData;
+        dropoffCoords: LocationPersistenceData;
       }) => ({
         ...commonData,
         id,
@@ -243,9 +242,30 @@ export async function POST(request: NextRequest) {
         roundTripGroupId: isRoundTrip ? basePublicBookingId : null,
         parentPublicBookingId: isRoundTrip ? basePublicBookingId : null,
         pickupLocation: pickup,
+        pickupLatitude: pickupCoords.latitude,
+        pickupLongitude: pickupCoords.longitude,
+        pickupPlaceId: pickupCoords.placeId,
+        pickupLocationSource: pickupCoords.source,
         dropoffLocation: dropoff,
+        dropoffLatitude: dropoffCoords.latitude,
+        dropoffLongitude: dropoffCoords.longitude,
+        dropoffPlaceId: dropoffCoords.placeId,
+        dropoffLocationSource: dropoffCoords.source,
         pickupDateTime,
       });
+
+      const pickupCoords = {
+        latitude: pickupLatitude ?? null,
+        longitude: pickupLongitude ?? null,
+        placeId: pickupPlaceId || null,
+        source: toPrismaBookingLocationSource(pickupLocationSource),
+      };
+      const dropoffCoords = {
+        latitude: dropoffLatitude ?? null,
+        longitude: dropoffLongitude ?? null,
+        placeId: dropoffPlaceId || null,
+        source: toPrismaBookingLocationSource(dropoffLocationSource),
+      };
 
       const bookingPlans = isRoundTrip
         ? [
@@ -256,6 +276,8 @@ export async function POST(request: NextRequest) {
               pickup: pickupLocation,
               dropoff: dropoffLocation,
               pickupDateTime: pickupAt,
+              pickupCoords,
+              dropoffCoords,
             },
             {
               id: crypto.randomUUID(),
@@ -264,6 +286,8 @@ export async function POST(request: NextRequest) {
               pickup: dropoffLocation,
               dropoff: pickupLocation,
               pickupDateTime: returnPickupAt as Date,
+              pickupCoords: dropoffCoords,
+              dropoffCoords: pickupCoords,
             },
           ]
         : [
@@ -274,6 +298,8 @@ export async function POST(request: NextRequest) {
               pickup: pickupLocation,
               dropoff: dropoffLocation,
               pickupDateTime: pickupAt,
+              pickupCoords,
+              dropoffCoords,
             },
           ];
 
@@ -319,6 +345,13 @@ class PublicBookingError extends Error {
     super(code);
   }
 }
+
+type LocationPersistenceData = {
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string | null;
+  source: ReturnType<typeof toPrismaBookingLocationSource>;
+};
 
 function getApiErrorResponse() {
   return {

@@ -5,6 +5,7 @@ import {
   getOrCreateBookingCustomer,
   normalizeCustomerPhone,
 } from '@/lib/publicBookingIds';
+import { toPrismaBookingLocationSource } from '@/lib/bookingLocation';
 import { CreateBookingInput, UpdateBookingStatusInput } from '@/types';
 
 export const createBooking = async (input: CreateBookingInput) => {
@@ -28,7 +29,15 @@ export const createBooking = async (input: CreateBookingInput) => {
           phone: normalizeCustomerPhone(input.phone),
           customerId: customer.id,
           pickupLocation: input.pickupLocation,
+          pickupLatitude: input.pickupLatitude ?? null,
+          pickupLongitude: input.pickupLongitude ?? null,
+          pickupPlaceId: input.pickupPlaceId || null,
+          pickupLocationSource: toPrismaBookingLocationSource(input.pickupLocationSource),
           dropoffLocation: input.dropoffLocation,
+          dropoffLatitude: input.dropoffLatitude ?? null,
+          dropoffLongitude: input.dropoffLongitude ?? null,
+          dropoffPlaceId: input.dropoffPlaceId || null,
+          dropoffLocationSource: toPrismaBookingLocationSource(input.dropoffLocationSource),
           pickupDateTime: input.pickupDateTime,
           carType: input.carType,
           fareAmount: input.fareAmount ?? null,

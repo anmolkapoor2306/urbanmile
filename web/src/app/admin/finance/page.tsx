@@ -1,10 +1,10 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
-import { AdminPageFrame, AdminPanel, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
-import prisma from '@/lib/prisma';
-import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
+import { AdminPageFrame, AdminPanel, adminSecondaryButtonClassName, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
 import { getPaymentStatusLabel } from '@/lib/dispatch';
 import { getBookingDisplayAssignee, sumMoney } from '@/lib/opsDashboard';
+import { loadFinanceBookingsSafely } from './loadFinanceBookings';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,12 +13,17 @@ export default async function FinancePage() {
     redirect('/admin/login');
   }
 
-  const bookings = (await prisma.booking.findMany({
-    select: bookingRecordSelect,
-    orderBy: { createdAt: 'desc' },
-    take: 1000,
-  })).map(serializeBooking);
+  const financeBookings = await loadFinanceBookingsSafely();
 
+  if (!financeBookings.ok) {
+    return (
+      <AdminPageFrame currentPage="finance">
+        <FinanceUnavailable message={financeBookings.message} />
+      </AdminPageFrame>
+    );
+  }
+
+  const { bookings } = financeBookings;
   const today = new Date();
   const revenueToday = sumMoney(
     bookings
@@ -115,6 +120,27 @@ export default async function FinancePage() {
         </div>
       </div>
     </AdminPageFrame>
+  );
+}
+
+function FinanceUnavailable({ message }: { message: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden">
+      <div className="shrink-0">
+        <h1 className="text-2xl font-black tracking-tight text-zinc-950 dark:text-white">Finance</h1>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Real payment, revenue, and payout visibility from booking records.
+        </p>
+      </div>
+
+      <AdminPanel className="p-6">
+        <h2 className="text-lg font-black text-zinc-950 dark:text-white">Finance data is temporarily unavailable</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{message}</p>
+        <Link href="/admin/finance" className={`mt-5 inline-flex ${adminSecondaryButtonClassName}`}>
+          Retry
+        </Link>
+      </AdminPanel>
+    </div>
   );
 }
 

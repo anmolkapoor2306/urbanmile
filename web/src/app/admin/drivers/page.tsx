@@ -6,6 +6,7 @@ import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 import { backfillDriverCodes } from '@/lib/driverCode';
 import { AdminPageFrame, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
 import { DriverManagementTable } from '@/components/admin/DriverManagementTable';
+import { AdminEmptyState } from '@/components/admin/AdminEmptyState';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,9 +15,22 @@ export default async function DriversPage() {
     redirect('/admin/login');
   }
 
-  await backfillDriverCodes(prisma);
+  try {
+    await backfillDriverCodes(prisma);
+  } catch (error) {
+    console.error('Failed to backfill driver codes:', error);
 
-  const [drivers, bookings] = await Promise.all([
+    return (
+      <AdminPageFrame currentPage="drivers">
+        <AdminEmptyState
+          title="Driver data is temporarily unavailable"
+          description="Driver data is temporarily unavailable. Please check database connection."
+        />
+      </AdminPageFrame>
+    );
+  }
+
+  const [driversResult, bookingsResult] = await Promise.allSettled([
     prisma.driver.findMany({
       select: driverRecordSelect,
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
@@ -28,6 +42,26 @@ export default async function DriversPage() {
       take: 500,
     }),
   ]);
+
+  if (driversResult.status === 'rejected') {
+    console.error('Failed to load drivers:', driversResult.reason);
+
+    return (
+      <AdminPageFrame currentPage="drivers">
+        <AdminEmptyState
+          title="Driver data is temporarily unavailable"
+          description="Driver data is temporarily unavailable. Please check database connection."
+        />
+      </AdminPageFrame>
+    );
+  }
+
+  if (bookingsResult.status === 'rejected') {
+    console.error('Failed to load active driver bookings:', bookingsResult.reason);
+  }
+
+  const drivers = driversResult.value;
+  const bookings = bookingsResult.status === 'fulfilled' ? bookingsResult.value : [];
 
   const serializedDrivers = drivers.map(serializeDriver);
   const serializedBookings = bookings.map(serializeBooking);

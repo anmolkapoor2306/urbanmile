@@ -285,5 +285,7 @@ enum OwnershipType {
 
 enum BookingLocationSource {
   MANUAL
+  AUTOCOMPLETE
+  MANUAL_PIN
   CURRENT_LOCATION
 }

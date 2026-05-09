@@ -10,7 +10,10 @@ import {
   normalizeCustomerPhone,
 } from '@/lib/publicBookingIds';
 import { z } from 'zod';
-import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
+import {
+  bookingLocationMetadataSchema,
+  toPrismaBookingLocationSource,
+} from '@/lib/bookingLocation';
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -132,12 +135,12 @@ export async function POST(request: NextRequest) {
           pickupLatitude: pickupLatitude ?? null,
           pickupLongitude: pickupLongitude ?? null,
           pickupPlaceId: pickupPlaceId || null,
-          pickupLocationSource: pickupLocationSource ? pickupLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+          pickupLocationSource: toPrismaBookingLocationSource(pickupLocationSource),
           dropoffLocation,
           dropoffLatitude: dropoffLatitude ?? null,
           dropoffLongitude: dropoffLongitude ?? null,
           dropoffPlaceId: dropoffPlaceId || null,
-          dropoffLocationSource: dropoffLocationSource ? dropoffLocationSource.toUpperCase().replace('-', '_') as 'MANUAL' | 'CURRENT_LOCATION' : null,
+          dropoffLocationSource: toPrismaBookingLocationSource(dropoffLocationSource),
           pickupDateTime: pickupAt,
           carType,
           specialInstructions: specialInstructions || null,

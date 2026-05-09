@@ -6,6 +6,7 @@ import { AdminPanel, adminInputClassName, adminSecondaryButtonClassName } from '
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
+import { buildGoogleMapsRouteUrl, formatCoordinatePair } from '@/lib/maps';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn, getCarTypeDisplay } from '@/lib/utils';
 
@@ -338,14 +339,37 @@ function DriverCard({
 }
 
 function BookingDetails({ booking }: { booking: SerializedBooking }) {
+  const routeUrl = buildGoogleMapsRouteUrl(
+    {
+      address: booking.pickupLocation,
+      latitude: booking.pickupLatitude,
+      longitude: booking.pickupLongitude,
+    },
+    {
+      address: booking.dropoffLocation,
+      latitude: booking.dropoffLatitude,
+      longitude: booking.dropoffLongitude,
+    }
+  );
+
   return (
     <div className="space-y-2 text-sm">
       <Detail label="Booking" value={booking.publicBookingId || booking.bookingReference} />
       <Detail label="Customer" value={`${booking.fullName} · ${booking.phone}`} />
       <Detail label="Route" value={`${booking.pickupLocation} to ${booking.dropoffLocation}`} />
+      <Detail label="Pickup coordinates" value={formatCoordinatePair(booking.pickupLatitude, booking.pickupLongitude)} />
+      <Detail label="Dropoff coordinates" value={formatCoordinatePair(booking.dropoffLatitude, booking.dropoffLongitude)} />
       <Detail label="Pickup" value={formatDateTime(booking.pickupDateTime)} />
       <Detail label="Vehicle / Fare" value={`${getCarTypeDisplay(booking.carType)} · ${booking.fareAmount ? formatMoney(booking.fareAmount) : 'Fare pending'}`} />
       <Detail label="Current Assignee" value={getBookingDisplayAssignee(booking)} />
+      <a
+        href={routeUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex min-h-10 items-center justify-center rounded-full border border-zinc-300 bg-white px-4 text-xs font-bold text-zinc-800 transition-colors hover:border-zinc-950 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-500"
+      >
+        Open route
+      </a>
     </div>
   );
 }

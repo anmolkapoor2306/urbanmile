@@ -6,7 +6,7 @@ export interface BookingLocationMetadata {
   latitude?: number | null;
   longitude?: number | null;
   placeId?: string;
-  source?: 'manual' | 'autocomplete' | 'current-location';
+  source?: 'manual' | 'autocomplete' | 'manual_pin' | 'current-location';
 }
 
 export interface BookingFormData {
@@ -51,7 +51,15 @@ export type Booking = {
   email: string;
   phone: string;
   pickupLocation: string;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  pickupPlaceId?: string | null;
+  pickupLocationSource?: BookingLocationMetadata['source'] | string | null;
   dropoffLocation: string;
+  dropoffLatitude?: number | null;
+  dropoffLongitude?: number | null;
+  dropoffPlaceId?: string | null;
+  dropoffLocationSource?: BookingLocationMetadata['source'] | string | null;
   pickupDateTime: Date;
   bookingMode?: string | null;
   carType:CarType;

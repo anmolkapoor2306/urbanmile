@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-export const bookingLocationSourceSchema = z.enum(['manual', 'current-location']);
+export const bookingLocationSourceSchema = z.enum([
+  'manual',
+  'autocomplete',
+  'manual_pin',
+  'current-location',
+]);
 
 export const bookingLocationMetadataSchema = z.object({
   latitude: z.number().min(-90).max(90).nullable().optional(),
@@ -19,6 +24,18 @@ export function createEmptyLocationMetadata(): BookingLocationMetadata {
     placeId: '',
     source: 'manual',
   };
+}
+
+export function toPrismaBookingLocationSource(source?: BookingLocationSource | null) {
+  if (!source) {
+    return null;
+  }
+
+  return source.toUpperCase().replace(/-/g, '_') as
+    | 'MANUAL'
+    | 'AUTOCOMPLETE'
+    | 'MANUAL_PIN'
+    | 'CURRENT_LOCATION';
 }
 
 export function getLocationUpgradeHint(type: 'pickup' | 'dropoff'): string {

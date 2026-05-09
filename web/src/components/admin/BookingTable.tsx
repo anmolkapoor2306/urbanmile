@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { adminInputClassName, adminInsetClassName } from '@/components/admin/AdminLayout';
 import { getPaymentStatusLabel, type BookingStatusValue, type PaymentStatusValue } from '@/lib/dispatch';
+import { buildGoogleMapsRouteUrl, formatCoordinatePair } from '@/lib/maps';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn } from '@/lib/utils';
 import type { CarType } from '@/types';
@@ -20,7 +21,13 @@ export interface AdminBooking {
   email: string;
   phone: string;
   pickupLocation: string;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  pickupLocationSource?: string | null;
   dropoffLocation: string;
+  dropoffLatitude?: number | null;
+  dropoffLongitude?: number | null;
+  dropoffLocationSource?: string | null;
   pickupDateTime: string;
   carType: CarType;
   specialInstructions: string | null;
@@ -413,6 +420,18 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
   }
 
   const parsedFare = fareValue.trim() === '' ? null : Number(fareValue);
+  const routeUrl = buildGoogleMapsRouteUrl(
+    {
+      address: booking.pickupLocation,
+      latitude: booking.pickupLatitude,
+      longitude: booking.pickupLongitude,
+    },
+    {
+      address: booking.dropoffLocation,
+      latitude: booking.dropoffLatitude,
+      longitude: booking.dropoffLongitude,
+    }
+  );
 
   if (isHidden) {
     return null;
@@ -493,6 +512,31 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
           <Info label="Payment" value={getPaymentStatusLabel((booking.paymentStatus || 'UNPAID') as never)} />
         </div>
 
+        <div className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+          <LocationInfo
+            label="Pickup address"
+            address={booking.pickupLocation}
+            latitude={booking.pickupLatitude}
+            longitude={booking.pickupLongitude}
+            source={booking.pickupLocationSource}
+          />
+          <LocationInfo
+            label="Dropoff address"
+            address={booking.dropoffLocation}
+            latitude={booking.dropoffLatitude}
+            longitude={booking.dropoffLongitude}
+            source={booking.dropoffLocationSource}
+          />
+          <a
+            href={routeUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-10 items-center justify-center rounded-full border border-zinc-300 bg-white px-4 text-xs font-bold text-zinc-800 transition-colors hover:border-zinc-950 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-500"
+          >
+            Open route
+          </a>
+        </div>
+
         {booking.specialInstructions ? (
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             Note: {booking.specialInstructions}
@@ -556,6 +600,39 @@ function Info({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm font-semibold text-zinc-800 dark:text-zinc-200">{value}</div>
     </div>
   );
+}
+
+function LocationInfo({
+  label,
+  address,
+  latitude,
+  longitude,
+  source,
+}: {
+  label: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  source?: string | null;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-1 break-words font-semibold text-zinc-800 dark:text-zinc-200">{address}</div>
+      <div className="mt-1 font-mono text-xs font-bold text-zinc-500 dark:text-zinc-400">
+        {formatCoordinatePair(latitude, longitude)}
+      </div>
+      {source ? (
+        <div className="mt-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          {formatLocationSource(source)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatLocationSource(source: string) {
+  return source.toLowerCase().replace(/_/g, ' ');
 }
 
 function formatDate(value: string) {

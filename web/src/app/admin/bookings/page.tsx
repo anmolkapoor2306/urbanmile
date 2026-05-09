@@ -5,6 +5,7 @@ import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 import { AdminPageFrame, AdminPanel, AdminStatsGrid, AdminStatCard } from '@/components/admin/AdminLayout';
 import { BookingTable } from '@/components/admin/BookingTable';
 import { BOOKING_STATUSES } from '@/lib/dispatch';
+import { AdminEmptyState } from '@/components/admin/AdminEmptyState';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,11 +14,26 @@ export default async function AdminBookingsPage() {
     redirect('/admin/login');
   }
 
-  const bookings = await prisma.booking.findMany({
-    select: bookingRecordSelect,
-    orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
-    take: 1000,
-  });
+  let bookings;
+
+  try {
+    bookings = await prisma.booking.findMany({
+      select: bookingRecordSelect,
+      orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
+      take: 1000,
+    });
+  } catch (error) {
+    console.error('Failed to load admin bookings:', error);
+
+    return (
+      <AdminPageFrame currentPage="bookings">
+        <AdminEmptyState
+          title="Bookings are temporarily unavailable"
+          description="Booking data is temporarily unavailable. Please check database connection."
+        />
+      </AdminPageFrame>
+    );
+  }
 
   const serializedBookings = bookings.map(serializeBooking);
   const activeBookings = serializedBookings.filter((booking) => !['COMPLETED', 'CANCELLED'].includes(booking.status));

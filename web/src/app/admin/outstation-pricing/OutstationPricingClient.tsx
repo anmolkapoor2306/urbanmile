@@ -362,6 +362,7 @@ function CityAutocompleteInput({
   required?: boolean;
 }) {
   const listboxId = useId();
+  const inputName = `${listboxId}-um-admin-rp`;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
@@ -454,7 +455,14 @@ function CityAutocompleteInput({
           }}
           onBlur={() => setIsOpen(false)}
           className={adminInputClassName}
-          autoComplete="off"
+          name={inputName}
+          autoComplete="new-password"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           role="combobox"
           aria-expanded={isOpen}
           aria-controls={listboxId}
@@ -687,21 +695,35 @@ export function OutstationPricingClient({
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                   <input
+                    name="um-filter-rp-a-9d2f"
                     value={fromFilter}
                     onChange={(event) => setFromFilter(event.target.value)}
                     placeholder="From city"
                     className={cn(adminInputClassName, 'pl-9')}
-                    autoComplete="off"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                   <input
+                    name="um-filter-rp-b-4a7c"
                     value={toFilter}
                     onChange={(event) => setToFilter(event.target.value)}
                     placeholder="To city"
                     className={cn(adminInputClassName, 'pl-9')}
-                    autoComplete="off"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div className="relative">

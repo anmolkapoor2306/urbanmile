@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent, useEffect, useMemo, useRef } from 'react';
+import { useState, FormEvent, useEffect, useId, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -39,6 +39,26 @@ const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
 const RIDE_OPTIONS_DRAFT_KEY = 'urbanmiles_ride_options_draft';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 const CITY_RESULT_TYPES = new Set(['city', 'county', 'state', 'postcode', 'district', 'suburb', 'locality']);
+const DEFAULT_PIN_LOCATION = {
+  latitude: 31.326,
+  longitude: 75.5762,
+  label: 'Jalandhar, Punjab',
+};
+const PIN_CITY_CENTERS: Record<string, { latitude: number; longitude: number; label: string }> = {
+  jalandhar: { latitude: 31.326, longitude: 75.5762, label: 'Jalandhar, Punjab' },
+  delhi: { latitude: 28.6139, longitude: 77.209, label: 'Delhi' },
+  'delhi city': { latitude: 28.6139, longitude: 77.209, label: 'Delhi City' },
+  'delhi airport': { latitude: 28.5562, longitude: 77.1, label: 'Delhi Airport' },
+  meerut: { latitude: 28.9845, longitude: 77.7064, label: 'Meerut, Uttar Pradesh' },
+  chandigarh: { latitude: 30.7333, longitude: 76.7794, label: 'Chandigarh' },
+  ludhiana: { latitude: 30.901, longitude: 75.8573, label: 'Ludhiana, Punjab' },
+  amritsar: { latitude: 31.634, longitude: 74.8723, label: 'Amritsar, Punjab' },
+  zirakpur: { latitude: 30.6425, longitude: 76.8173, label: 'Zirakpur, Punjab' },
+  panchkula: { latitude: 30.6942, longitude: 76.8606, label: 'Panchkula, Haryana' },
+  patiala: { latitude: 30.3398, longitude: 76.3869, label: 'Patiala, Punjab' },
+  hoshiarpur: { latitude: 31.5324, longitude: 75.9174, label: 'Hoshiarpur, Punjab' },
+  moga: { latitude: 30.8165, longitude: 75.1717, label: 'Moga, Punjab' },
+};
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -82,6 +102,7 @@ type AddressSuggestion = {
   city: string;
   state: string;
   displayName: string;
+  source: 'autocomplete' | 'manual';
 };
 type GeoapifyAutocompleteResult = {
   formatted?: string;
@@ -142,6 +163,12 @@ type PublicOutstationQuoteResponse = {
     customPricingRequired: boolean;
   };
 };
+type ManualPinSelection = {
+  label: string;
+  reverseLabel?: string;
+  latitude: number;
+  longitude: number;
+};
 
 type CustomerProfile = {
   fullName: string;
@@ -162,6 +189,8 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   const [isSuccess, setIsSuccess] = useState(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   const pickupTimingMenuRef = useRef<HTMLDivElement>(null);
+  const pickupLocationInputName = `${useId()}-um-rp-a`;
+  const dropoffLocationInputName = `${useId()}-um-rp-b`;
   const pickupField = useBookingLocationField();
   const dropoffField = useBookingLocationField();
   const [bookingMode, setBookingMode] = useState<BookingMode>('ONE_WAY');
@@ -232,6 +261,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   const [isLocatingPickup, setIsLocatingPickup] = useState(false);
   const [pickupLocationError, setPickupLocationError] = useState<string | null>(null);
   const [showDateTimeModal, setShowDateTimeModal] = useState(false);
+  const [manualPinField, setManualPinField] = useState<LocationFieldName | null>(null);
 
   const finalPrice = priceQuote ? getRideFare(priceQuote, selectedRide) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
@@ -326,7 +356,9 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     const fieldName = activeLocationField;
     const query = activeLocationValue.trim();
 
-    if (query.length < 2) {
+    if (!hasMeaningfulLocationQuery(query)) {
+      setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
+      setIsAddressLoading((prev) => ({ ...prev, [fieldName]: false }));
       return;
     }
 
@@ -364,7 +396,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     const { name, value } = e.target;
     setBookingError(null);
 
-    if (name === 'pickup_location_field') {
+    if (name === pickupLocationInputName) {
       pickupField.updateAddress(value);
       setPickupLocationError(null);
       setRouteMessage(null);
@@ -377,7 +409,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         pickupPlaceId: '',
         pickupLocationSource: 'manual',
       }));
-    } else if (name === 'dropoff_location_field') {
+    } else if (name === dropoffLocationInputName) {
       dropoffField.updateAddress(value);
       setRouteMessage(null);
       setPriceQuote(null);
@@ -404,9 +436,9 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     }
 
     const errorName =
-      name === 'pickup_location_field'
+      name === pickupLocationInputName
         ? 'pickupLocation'
-        : name === 'dropoff_location_field'
+        : name === dropoffLocationInputName
           ? 'dropoffLocation'
           : name === 'pickupDate' || name === 'pickupTime'
             ? 'pickupDateTime'
@@ -418,13 +450,15 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       setErrors((prev) => ({ ...prev, [errorName]: undefined }));
     }
 
-    if (name === 'pickup_location_field' || name === 'dropoff_location_field') {
-      const fieldName = name === 'pickup_location_field' ? 'pickupLocation' : 'dropoffLocation';
+    if (name === pickupLocationInputName || name === dropoffLocationInputName) {
+      const fieldName = name === pickupLocationInputName ? 'pickupLocation' : 'dropoffLocation';
       setActiveLocationField(fieldName);
       setHighlightedSuggestionIndex(0);
-      if (value.trim().length < 2) {
+      if (!hasMeaningfulLocationQuery(value)) {
         setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
         setIsAddressLoading((prev) => ({ ...prev, [fieldName]: false }));
+      } else {
+        setIsAddressLoading((prev) => ({ ...prev, [fieldName]: true }));
       }
     }
   };
@@ -437,7 +471,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         latitude: suggestion.latitude,
         longitude: suggestion.longitude,
         placeId: suggestion.placeId,
-        source: 'manual',
+        source: suggestion.source,
       });
       setPickupLocationError(null);
       setFormData((prev) => ({
@@ -446,14 +480,14 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         pickupLatitude: suggestion.latitude,
         pickupLongitude: suggestion.longitude,
         pickupPlaceId: suggestion.placeId,
-        pickupLocationSource: 'manual',
+        pickupLocationSource: suggestion.source,
       }));
     } else {
       dropoffField.setResolvedLocation(selectedLocation, {
         latitude: suggestion.latitude,
         longitude: suggestion.longitude,
         placeId: suggestion.placeId,
-        source: 'manual',
+        source: suggestion.source,
       });
       setFormData((prev) => ({
         ...prev,
@@ -461,7 +495,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         dropoffLatitude: suggestion.latitude,
         dropoffLongitude: suggestion.longitude,
         dropoffPlaceId: suggestion.placeId,
-        dropoffLocationSource: 'manual',
+        dropoffLocationSource: suggestion.source,
       }));
     }
 
@@ -471,6 +505,50 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     setActiveLocationField(null);
     setHighlightedSuggestionIndex(0);
     setAddressSuggestions((prev) => ({ ...prev, [fieldName]: [] }));
+  };
+
+  const handleManualPinConfirm = (selection: ManualPinSelection) => {
+    const label = getManualPinConfirmationLabel(selection);
+
+    if (manualPinField === 'pickupLocation') {
+      pickupField.setResolvedLocation(label, {
+        latitude: selection.latitude,
+        longitude: selection.longitude,
+        placeId: '',
+        source: 'manual_pin',
+      });
+      setPickupLocationError(null);
+      setFormData((prev) => ({
+        ...prev,
+        pickupLocation: label,
+        pickupLatitude: selection.latitude,
+        pickupLongitude: selection.longitude,
+        pickupPlaceId: '',
+        pickupLocationSource: 'manual_pin',
+      }));
+      setErrors((prev) => ({ ...prev, pickupLocation: undefined }));
+    } else if (manualPinField === 'dropoffLocation') {
+      dropoffField.setResolvedLocation(label, {
+        latitude: selection.latitude,
+        longitude: selection.longitude,
+        placeId: '',
+        source: 'manual_pin',
+      });
+      setFormData((prev) => ({
+        ...prev,
+        dropoffLocation: label,
+        dropoffLatitude: selection.latitude,
+        dropoffLongitude: selection.longitude,
+        dropoffPlaceId: '',
+        dropoffLocationSource: 'manual_pin',
+      }));
+      setErrors((prev) => ({ ...prev, dropoffLocation: undefined }));
+    }
+
+    setRouteMessage(null);
+    setPriceQuote(null);
+    setActiveLocationField(null);
+    setManualPinField(null);
   };
 
   const handleLocationFieldKeyDown = (
@@ -588,8 +666,18 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         if (parsed.formData) {
           // eslint-disable-next-line react-hooks/set-state-in-effect
           setFormData(parsed.formData);
-          pickupField.updateAddress(parsed.formData.pickupLocation);
-          dropoffField.updateAddress(parsed.formData.dropoffLocation);
+          pickupField.setResolvedLocation(parsed.formData.pickupLocation, {
+            latitude: parsed.formData.pickupLatitude ?? null,
+            longitude: parsed.formData.pickupLongitude ?? null,
+            placeId: parsed.formData.pickupPlaceId,
+            source: parsed.formData.pickupLocationSource ?? 'manual',
+          });
+          dropoffField.setResolvedLocation(parsed.formData.dropoffLocation, {
+            latitude: parsed.formData.dropoffLatitude ?? null,
+            longitude: parsed.formData.dropoffLongitude ?? null,
+            placeId: parsed.formData.dropoffPlaceId,
+            source: parsed.formData.dropoffLocationSource ?? 'manual',
+          });
         }
         if (parsed.bookingMode) setBookingMode(parsed.bookingMode);
         if (parsed.pickupTiming) setPickupTiming(parsed.pickupTiming);
@@ -914,7 +1002,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
+    const fixedRoutePrice = await getBookingRoutePriceQuote(formData);
 
     if (!fixedRoutePrice) {
       setPriceQuote(null);
@@ -971,7 +1059,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
+    const fixedRoutePrice = await getBookingRoutePriceQuote(formData);
 
     if (!fixedRoutePrice) {
       setShowDateTimeModal(false);
@@ -1381,7 +1469,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
 
           <div className="space-y-3">
             <BookingField
-              name="pickup_location_field"
+              name={pickupLocationInputName}
               value={pickupField.address}
               onChange={handleInputChange}
               onFocus={() => {
@@ -1400,9 +1488,14 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
               onLocationIconClick={handleUseCurrentLocation}
               isLoadingLocation={isLocatingPickup}
               isLoadingSuggestions={activeLocationField === 'pickupLocation' && isAddressLoading.pickupLocation}
+              onPickOnMap={() => setManualPinField('pickupLocation')}
+              showPickOnMapOption={
+                activeLocationField === 'pickupLocation' &&
+                shouldShowPickOnMapOption(pickupField.address, addressSuggestions.pickupLocation)
+              }
             />
             <BookingField
-              name="dropoff_location_field"
+              name={dropoffLocationInputName}
               value={dropoffField.address}
               onChange={handleInputChange}
               onFocus={() => {
@@ -1418,7 +1511,12 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
               highlightedSuggestionIndex={highlightedSuggestionIndex}
               onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('dropoffLocation', suggestion)}
               isLoadingSuggestions={activeLocationField === 'dropoffLocation' && isAddressLoading.dropoffLocation}
-             />
+              onPickOnMap={() => setManualPinField('dropoffLocation')}
+              showPickOnMapOption={
+                activeLocationField === 'dropoffLocation' &&
+                shouldShowPickOnMapOption(dropoffField.address, addressSuggestions.dropoffLocation)
+              }
+            />
 
              <div ref={pickupTimingMenuRef} className="relative inline-block">
               <button
@@ -1512,6 +1610,18 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         </div>
       )}
     </form>
+    {manualPinField && (
+      <ManualPinMapModal
+        fieldLabel={manualPinField === 'pickupLocation' ? 'pickup' : 'dropoff'}
+        initialLocation={getManualPinInitialLocation(
+          manualPinField,
+          formData,
+          addressSuggestions[manualPinField]
+        )}
+        onCancel={() => setManualPinField(null)}
+        onConfirm={handleManualPinConfirm}
+      />
+    )}
     {showDateTimeModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-4 py-6 backdrop-blur-sm">
         <div className="w-full max-w-lg overflow-y-auto rounded-[26px] bg-white p-5 shadow-2xl shadow-zinc-950/25 dark:bg-zinc-950 sm:p-6">
@@ -1655,6 +1765,206 @@ const mainActionClassName = cn(
   'flex min-h-13 w-full items-center justify-center overflow-hidden rounded-full bg-zinc-950 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-zinc-950/15 transition-all duration-200 ease-out hover:bg-zinc-800',
   'disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300'
 );
+
+function ManualPinMapModal({
+  fieldLabel,
+  initialLocation,
+  onCancel,
+  onConfirm,
+}: {
+  fieldLabel: 'pickup' | 'dropoff';
+  initialLocation: ManualPinSelection;
+  onCancel: () => void;
+  onConfirm: (selection: ManualPinSelection) => void;
+}) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [latitude, setLatitude] = useState(initialLocation.latitude);
+  const [longitude, setLongitude] = useState(initialLocation.longitude);
+  const [label, setLabel] = useState('');
+  const [reverseLabel, setReverseLabel] = useState('');
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    let map: import('maplibre-gl').Map | null = null;
+    let marker: import('maplibre-gl').Marker | null = null;
+
+    const initMap = async () => {
+      const maplibregl = await import('maplibre-gl');
+
+      if (!isMounted || !mapContainerRef.current) {
+        return;
+      }
+
+      const center: [number, number] = [initialLocation.longitude, initialLocation.latitude];
+
+      map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors',
+            },
+          },
+          layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+        },
+        center,
+        zoom: 14,
+        attributionControl: false,
+      });
+
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+      const markerElement = document.createElement('div');
+      markerElement.className = 'h-7 w-7 rounded-full border-4 border-white bg-amber-500 shadow-xl shadow-zinc-950/30 ring-2 ring-zinc-950/10';
+
+      marker = new maplibregl.Marker({ element: markerElement, draggable: true })
+        .setLngLat(center)
+        .addTo(map);
+
+      const updateFromMarker = () => {
+        if (!marker) {
+          return;
+        }
+
+        const next = marker.getLngLat();
+        setLatitude(Number(next.lat.toFixed(6)));
+        setLongitude(Number(next.lng.toFixed(6)));
+      };
+
+      marker.on('dragend', updateFromMarker);
+      map.on('click', (event) => {
+        marker?.setLngLat(event.lngLat);
+        updateFromMarker();
+      });
+      map.once('load', () => map?.resize());
+    };
+
+    void initMap();
+
+    return () => {
+      isMounted = false;
+      map?.remove();
+    };
+  }, [initialLocation.latitude, initialLocation.longitude]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setReverseLabel('');
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const resolvedReverseLabel = await reverseGeocodePinnedLocation(latitude, longitude);
+        if (!isMounted) {
+          return;
+        }
+
+        setReverseLabel(resolvedReverseLabel || '');
+      } catch {
+        if (isMounted) {
+          setReverseLabel('');
+        }
+      }
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timer);
+    };
+  }, [latitude, longitude]);
+
+  const handleConfirm = async () => {
+    const noteLabel = label.trim();
+    let nextReverseLabel = reverseLabel.trim();
+
+    if (!noteLabel && !nextReverseLabel) {
+      setIsConfirming(true);
+      try {
+        nextReverseLabel = (await reverseGeocodePinnedLocation(latitude, longitude))?.trim() || '';
+        setReverseLabel(nextReverseLabel);
+      } catch {
+        nextReverseLabel = '';
+      }
+    }
+
+    onConfirm({
+      label: noteLabel,
+      reverseLabel: nextReverseLabel,
+      latitude,
+      longitude,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-[28px] bg-white shadow-2xl shadow-zinc-950/30 dark:bg-zinc-950 sm:rounded-[28px]">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-4 py-4 dark:border-zinc-800 sm:px-5">
+          <div>
+            <h3 className="text-xl font-black text-zinc-950 dark:text-white">
+              Pick {fieldLabel} on map
+            </h3>
+            <p className="mt-1 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+              Drop or drag the pin, then add a landmark if needed.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white"
+            aria-label="Cancel location picker"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="dashboard-scrollbar min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+          <div className="h-[52vh] min-h-[320px] overflow-hidden rounded-[20px] border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
+            <div ref={mapContainerRef} className="h-full w-full" />
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+              Landmark or address note
+            </span>
+            <textarea
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="House number, colony, gate, nearby landmark"
+              className="mt-2 min-h-20 w-full resize-none rounded-[18px] border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-950 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-950 focus:bg-white focus:ring-4 focus:ring-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-amber-300 dark:focus:bg-zinc-950 dark:focus:ring-amber-300/10"
+            />
+          </label>
+
+          <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
+            Pin selected. Add a landmark or address note if needed.
+          </div>
+        </div>
+
+        <div className="grid gap-2 border-t border-zinc-200 bg-white/95 p-4 dark:border-zinc-800 dark:bg-zinc-950/95 sm:grid-cols-2 sm:px-5">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={isConfirming}
+            className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-black text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+          >
+            {isConfirming ? 'Confirming...' : 'Confirm Location'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type RideSelectionOption = {
   value: RideOption;
@@ -2051,7 +2361,7 @@ function RideMapPreview({
         distanceKm: null,
         durationMinutes: null,
         isLoading: false,
-        error: 'Choose Geoapify pickup and dropoff suggestions to preview the route.',
+        error: 'Choose address suggestions or map pins to preview the route.',
       });
       return;
     }
@@ -2197,7 +2507,7 @@ function RideMapPreview({
           <MapPin className="mx-auto h-8 w-8 text-amber-500" aria-hidden="true" />
           <h3 className="mt-3 text-lg font-black text-zinc-950 dark:text-white">Map preview</h3>
           <p className="mt-2 text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
-            Select Geoapify pickup and dropoff suggestions to show markers and route details.
+            Select address suggestions or pick both locations on the map to show markers and route details.
           </p>
         </div>
       </div>
@@ -2254,6 +2564,8 @@ interface BookingFieldProps extends React.InputHTMLAttributes<HTMLInputElement> 
   onLocationIconClick?: () => void;
   isLoadingLocation?: boolean;
   isLoadingSuggestions?: boolean;
+  onPickOnMap?: () => void;
+  showPickOnMapOption?: boolean;
 }
 
 function BookingField({
@@ -2267,10 +2579,14 @@ function BookingField({
   onLocationIconClick,
   isLoadingLocation,
   isLoadingSuggestions,
+  onPickOnMap,
+  showPickOnMapOption,
   ...props
 }: BookingFieldProps) {
   const listboxId = `${props.name ?? 'location'}-suggestions`;
-  const showDropdown = suggestions.length > 0 || isLoadingSuggestions;
+  const canPickOnMap = Boolean(showPickOnMapOption && onPickOnMap);
+  const hasTypedQuery = typeof props.value === 'string' && hasMeaningfulLocationQuery(props.value);
+  const showDropdown = suggestions.length > 0 || isLoadingSuggestions || canPickOnMap;
 
   return (
     <div className="relative">
@@ -2296,6 +2612,9 @@ function BookingField({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           aria-invalid={!!error}
           aria-autocomplete={showDropdown ? 'list' : undefined}
           aria-controls={showDropdown ? listboxId : undefined}
@@ -2333,15 +2652,37 @@ function BookingField({
         <div
           id={listboxId}
           role="listbox"
-          className="dashboard-scrollbar absolute left-0 right-0 top-[calc(100%+8px)] z-40 max-h-[min(18rem,52vh)] overflow-y-auto rounded-[18px] border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
+          className="dashboard-scrollbar absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-[min(16rem,52vh)] overflow-y-auto rounded-[18px] border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30"
         >
+          {canPickOnMap ? (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onPickOnMap}
+              className={cn(
+                'flex min-h-14 w-full items-center gap-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm font-black text-zinc-950 transition-colors touch-manipulation',
+                'hover:border-amber-300 hover:bg-amber-100 focus:border-amber-300 focus:bg-amber-100 focus:outline-none',
+                'dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-white dark:hover:border-amber-300/40 dark:hover:bg-amber-400/15 dark:focus:bg-amber-400/15'
+              )}
+            >
+              <MapPin className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block truncate">Pick on map</span>
+                <span className="mt-0.5 block truncate text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  Best for streets, villages, colonies, or exact pickup points
+                </span>
+              </span>
+            </button>
+          ) : null}
           {isLoadingSuggestions ? (
-            <div className="flex min-h-10 items-center gap-2 rounded-[14px] px-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+            <div className="mt-1 flex min-h-10 items-center gap-2 rounded-[14px] px-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               Searching addresses...
             </div>
           ) : null}
-          {!isLoadingSuggestions && suggestions.length === 0 ? (
+          {!isLoadingSuggestions && suggestions.length === 0 && hasTypedQuery && !canPickOnMap ? (
             <div className="min-h-10 rounded-[14px] px-3 py-2.5 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
               No addresses found
             </div>
@@ -2400,6 +2741,31 @@ async function fetchGeoapifyAddressSuggestions(query: string, signal: AbortSigna
     .filter((suggestion): suggestion is AddressSuggestion => Boolean(suggestion));
 }
 
+async function reverseGeocodePinnedLocation(latitude: number, longitude: number): Promise<string | null> {
+  if (!GEOAPIFY_API_KEY) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    lat: String(latitude),
+    lon: String(longitude),
+    format: 'json',
+    lang: 'en',
+    apiKey: GEOAPIFY_API_KEY,
+  });
+
+  const response = await fetch(`https://api.geoapify.com/v1/geocode/reverse?${params.toString()}`);
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as GeoapifyAutocompleteResponse;
+  const firstResult = data.results?.[0];
+
+  return firstResult?.formatted?.trim() || null;
+}
+
 function createGeoapifyAddressSuggestion(
   result: GeoapifyAutocompleteResult,
   index: number
@@ -2429,6 +2795,7 @@ function createGeoapifyAddressSuggestion(
     city: location.city,
     state: location.state,
     displayName: location.displayName,
+    source: 'autocomplete',
   };
 }
 
@@ -2447,7 +2814,118 @@ function createManualAddressSuggestion(cityName: string): AddressSuggestion {
     city: cityName,
     state,
     displayName,
+    source: 'manual',
   };
+}
+
+function getManualPinInitialLocation(
+  fieldName: LocationFieldName,
+  formData: BookingFormData,
+  suggestions: AddressSuggestion[] = []
+): ManualPinSelection {
+  const latitude =
+    fieldName === 'pickupLocation' ? formData.pickupLatitude : formData.dropoffLatitude;
+  const longitude =
+    fieldName === 'pickupLocation' ? formData.pickupLongitude : formData.dropoffLongitude;
+  const label = fieldName === 'pickupLocation' ? formData.pickupLocation : formData.dropoffLocation;
+
+  if (typeof latitude === 'number' && typeof longitude === 'number') {
+    return {
+      latitude,
+      longitude,
+      label,
+    };
+  }
+
+  const suggestionWithCoordinates = suggestions.find(
+    (suggestion) =>
+      typeof suggestion.latitude === 'number' &&
+      typeof suggestion.longitude === 'number'
+  );
+
+  if (
+    suggestionWithCoordinates &&
+    typeof suggestionWithCoordinates.latitude === 'number' &&
+    typeof suggestionWithCoordinates.longitude === 'number'
+  ) {
+    return {
+      latitude: suggestionWithCoordinates.latitude,
+      longitude: suggestionWithCoordinates.longitude,
+      label: label || suggestionWithCoordinates.displayName,
+    };
+  }
+
+  const cityCenter = getPinnedCityCenter(label);
+  if (cityCenter) {
+    return {
+      latitude: cityCenter.latitude,
+      longitude: cityCenter.longitude,
+      label: label || cityCenter.label,
+    };
+  }
+
+  return {
+    latitude: DEFAULT_PIN_LOCATION.latitude,
+    longitude: DEFAULT_PIN_LOCATION.longitude,
+    label: label || DEFAULT_PIN_LOCATION.label,
+  };
+}
+
+function shouldShowPickOnMapOption(query: string, suggestions: AddressSuggestion[]) {
+  return hasMeaningfulLocationQuery(query) || suggestions.length > 0;
+}
+
+function hasMeaningfulLocationQuery(query: string) {
+  return normalizeMeaningfulLocationQuery(query).length >= 3;
+}
+
+function normalizeMeaningfulLocationQuery(query: string) {
+  return query.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getPinnedCityCenter(query: string) {
+  const normalizedQuery = normalizeLocationTextForCityMatch(query);
+
+  if (!normalizedQuery) {
+    return null;
+  }
+
+  return Object.entries(PIN_CITY_CENTERS)
+    .sort(([left], [right]) => right.length - left.length)
+    .find(([city]) => containsCityToken(normalizedQuery, city))?.[1] ?? null;
+}
+
+function normalizeLocationTextForCityMatch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function containsCityToken(value: string, city: string) {
+  return (
+    value === city ||
+    value.startsWith(`${city} `) ||
+    value.endsWith(` ${city}`) ||
+    value.includes(` ${city} `)
+  );
+}
+
+function getPinnedLocationFallbackLabel(latitude: number, longitude: number) {
+  return `Map pin: ${formatShortCoordinate(latitude)}, ${formatShortCoordinate(longitude)}`;
+}
+
+function formatShortCoordinate(value: number) {
+  return value.toFixed(2);
+}
+
+function getManualPinConfirmationLabel(selection: ManualPinSelection) {
+  return (
+    selection.label.trim() ||
+    selection.reverseLabel?.trim() ||
+    getPinnedLocationFallbackLabel(selection.latitude, selection.longitude)
+  );
 }
 
 async function getRoutePriceQuote(pickupLocation: string, dropoffLocation: string): Promise<FixedRoutePrice | null> {
@@ -2485,8 +2963,84 @@ async function getRoutePriceQuote(pickupLocation: string, dropoffLocation: strin
   return getFixedRoutePrice(pickupLocation, dropoffLocation);
 }
 
+async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<FixedRoutePrice | null> {
+  const coordinateQuote = getCoordinateFallbackPriceQuote(formData);
+  const hasManualPin =
+    formData.pickupLocationSource === 'manual_pin' ||
+    formData.dropoffLocationSource === 'manual_pin';
+
+  if (hasManualPin && coordinateQuote) {
+    return coordinateQuote;
+  }
+
+  return (
+    (await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation)) ??
+    coordinateQuote
+  );
+}
+
 function normalizeRouteLabel(value: string) {
   return value.trim().toLowerCase();
+}
+
+function getCoordinateFallbackPriceQuote(formData: BookingFormData): FixedRoutePrice | null {
+  const {
+    pickupLatitude,
+    pickupLongitude,
+    dropoffLatitude,
+    dropoffLongitude,
+    pickupLocation,
+    dropoffLocation,
+  } = formData;
+
+  if (
+    typeof pickupLatitude !== 'number' ||
+    typeof pickupLongitude !== 'number' ||
+    typeof dropoffLatitude !== 'number' ||
+    typeof dropoffLongitude !== 'number'
+  ) {
+    return null;
+  }
+
+  const directDistanceKm = getHaversineDistanceKm(
+    pickupLatitude,
+    pickupLongitude,
+    dropoffLatitude,
+    dropoffLongitude
+  );
+  const estimatedRoadKm = Math.max(1, directDistanceKm * 1.25);
+  const sedanPrice = Math.max(250, Math.round(estimatedRoadKm * 16));
+
+  return {
+    pickupCity: normalizeRouteLabel(pickupLocation),
+    dropoffCity: normalizeRouteLabel(dropoffLocation),
+    sedanPrice,
+    suvMarkup: 1000,
+    routeId: null,
+  };
+}
+
+function getHaversineDistanceKm(
+  startLatitude: number,
+  startLongitude: number,
+  endLatitude: number,
+  endLongitude: number
+) {
+  const earthRadiusKm = 6371;
+  const latitudeDelta = toRadians(endLatitude - startLatitude);
+  const longitudeDelta = toRadians(endLongitude - startLongitude);
+  const startLatRadians = toRadians(startLatitude);
+  const endLatRadians = toRadians(endLatitude);
+
+  const halfChord =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(startLatRadians) * Math.cos(endLatRadians) * Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(halfChord), Math.sqrt(1 - halfChord));
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
 }
 
 function buildPickupDateTime(date: string, time: string) {
