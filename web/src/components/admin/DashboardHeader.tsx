@@ -49,7 +49,7 @@ const navItems: Array<{
   { key: 'bookings', label: 'Bookings', href: '/admin/bookings', icon: CalendarCheck },
   { key: 'drivers', label: 'Drivers', href: '/admin/drivers', icon: Users },
   { key: 'fleet', label: 'Fleet', href: '/admin/fleet', icon: Car },
-  { key: 'outstation-pricing', label: 'Outstation Pricing', href: '/admin/outstation-pricing', icon: Route },
+  { key: 'outstation-pricing', label: 'Pricing', href: '/admin/outstation-pricing', icon: Route },
   { key: 'customers', label: 'Customers', href: '/admin/customers', icon: UserRound },
   { key: 'finance', label: 'Finance', href: '/admin/finance', icon: Wallet },
   { key: 'reports', label: 'Reports', href: '/admin/reports', icon: BarChart3 },

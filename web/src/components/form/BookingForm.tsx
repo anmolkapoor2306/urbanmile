@@ -7,7 +7,6 @@ import {
   CalendarClock,
   Car,
   ChevronDown,
-  ChevronRight,
   Clock3,
   CreditCard,
   Loader2,
@@ -29,6 +28,17 @@ import {
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
 import {
+  createTripOverrideDebugInfo,
+  getTripOverrideMilesXlMarkupAmount,
+  getTripOverrideSedanPrice,
+  logTripOverrideDebug,
+  matchTripOverride,
+  sanitizeTripOverrides,
+  type TripOverride,
+  type TripOverrideDebugInfo,
+  type TripOverrideMatch,
+} from '@/lib/tripOverrides';
+import {
   cleanGeoapifyCityLocation,
   formatCityStateDisplay,
   getKnownIndianCityState,
@@ -37,8 +47,10 @@ import {
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
 const RIDE_OPTIONS_DRAFT_KEY = 'urbanmiles_ride_options_draft';
+const TRIP_OVERRIDE_STORAGE_KEY = 'urbanmiles-pricing-engine-trip-overrides';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 const CITY_RESULT_TYPES = new Set(['city', 'county', 'state', 'postcode', 'district', 'suburb', 'locality']);
+const ACTIVE_CUSTOMER_RIDE = 'SEDAN' as const;
 const DEFAULT_PIN_LOCATION = {
   latitude: 31.326,
   longitude: 75.5762,
@@ -68,8 +80,8 @@ const bookingSchema = z.object({
   pickupLocation: z.string().min(1, 'Please enter pickup location'),
   dropoffLocation: z.string().min(1, 'Please enter drop location'),
   pickupDateTime: z.string().min(1, 'Please select pickup date and time'),
-  carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val !== undefined, {
-    message: 'Please select a vehicle type',
+  carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val === ACTIVE_CUSTOMER_RIDE, {
+    message: 'Miles XL is coming soon. Please book Miles Eco for now.',
   }),
   fareAmount: z.number().positive().optional(),
   specialInstructions: z.string().optional(),
@@ -161,6 +173,9 @@ type PublicOutstationQuoteResponse = {
     sedanPrice: number | null;
     suvMarkup: number | null;
     customPricingRequired: boolean;
+    priceSource?: FixedRoutePrice['priceSource'];
+    tripOverrideId?: string | null;
+    overrideDebug?: TripOverrideDebugInfo;
   };
 };
 type ManualPinSelection = {
@@ -285,7 +300,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         : 'Scheduled time pending';
 
   const handleRideSelect = (nextRide: RideOption) => {
-    if (!priceQuote) {
+    if (!priceQuote || nextRide !== ACTIVE_CUSTOMER_RIDE) {
       return;
     }
 
@@ -299,7 +314,17 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   };
 
   const openRideOptionsPage = (draft: RideOptionsDraft) => {
-    window.sessionStorage.setItem(RIDE_OPTIONS_DRAFT_KEY, JSON.stringify(draft));
+    const ecoDraft: RideOptionsDraft = {
+      ...draft,
+      selectedRide: ACTIVE_CUSTOMER_RIDE,
+      formData: {
+        ...draft.formData,
+        carType: ACTIVE_CUSTOMER_RIDE,
+        fareAmount: getRideFare(draft.priceQuote, ACTIVE_CUSTOMER_RIDE),
+      },
+    };
+
+    window.sessionStorage.setItem(RIDE_OPTIONS_DRAFT_KEY, JSON.stringify(ecoDraft));
     router.push('/choose-ride');
   };
 
@@ -320,18 +345,24 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       }
 
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFormData(parsed.formData);
-      pickupField.setResolvedLocation(parsed.formData.pickupLocation, {
-        latitude: parsed.formData.pickupLatitude ?? null,
-        longitude: parsed.formData.pickupLongitude ?? null,
-        placeId: parsed.formData.pickupPlaceId,
-        source: parsed.formData.pickupLocationSource ?? 'manual',
+      const restoredFormData: BookingFormData = {
+        ...parsed.formData,
+        carType: ACTIVE_CUSTOMER_RIDE,
+        fareAmount: getRideFare(parsed.priceQuote, ACTIVE_CUSTOMER_RIDE),
+      };
+
+      setFormData(restoredFormData);
+      pickupField.setResolvedLocation(restoredFormData.pickupLocation, {
+        latitude: restoredFormData.pickupLatitude ?? null,
+        longitude: restoredFormData.pickupLongitude ?? null,
+        placeId: restoredFormData.pickupPlaceId,
+        source: restoredFormData.pickupLocationSource ?? 'manual',
       });
-      dropoffField.setResolvedLocation(parsed.formData.dropoffLocation, {
-        latitude: parsed.formData.dropoffLatitude ?? null,
-        longitude: parsed.formData.dropoffLongitude ?? null,
-        placeId: parsed.formData.dropoffPlaceId,
-        source: parsed.formData.dropoffLocationSource ?? 'manual',
+      dropoffField.setResolvedLocation(restoredFormData.dropoffLocation, {
+        latitude: restoredFormData.dropoffLatitude ?? null,
+        longitude: restoredFormData.dropoffLongitude ?? null,
+        placeId: restoredFormData.dropoffPlaceId,
+        source: restoredFormData.dropoffLocationSource ?? 'manual',
       });
       setBookingMode(parsed.bookingMode ?? 'ONE_WAY');
       setPickupTiming(parsed.pickupTiming ?? 'NOW');
@@ -339,7 +370,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       setPickupTime(parsed.pickupTime ?? '');
       setReturnDate(parsed.returnDate ?? '');
       setReturnTime(parsed.returnTime ?? '');
-      setSelectedRide(parsed.selectedRide === 'VAN' ? 'VAN' : 'SEDAN');
+      setSelectedRide(ACTIVE_CUSTOMER_RIDE);
       setPriceQuote(parsed.priceQuote);
     } catch {
       window.sessionStorage.removeItem(RIDE_OPTIONS_DRAFT_KEY);
@@ -664,19 +695,27 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         };
 
         if (parsed.formData) {
+          const restoredFormData: BookingFormData = {
+            ...parsed.formData,
+            carType: ACTIVE_CUSTOMER_RIDE,
+            fareAmount: parsed.priceQuote
+              ? getRideFare(parsed.priceQuote, ACTIVE_CUSTOMER_RIDE)
+              : parsed.formData.fareAmount,
+          };
+
           // eslint-disable-next-line react-hooks/set-state-in-effect
-          setFormData(parsed.formData);
-          pickupField.setResolvedLocation(parsed.formData.pickupLocation, {
-            latitude: parsed.formData.pickupLatitude ?? null,
-            longitude: parsed.formData.pickupLongitude ?? null,
-            placeId: parsed.formData.pickupPlaceId,
-            source: parsed.formData.pickupLocationSource ?? 'manual',
+          setFormData(restoredFormData);
+          pickupField.setResolvedLocation(restoredFormData.pickupLocation, {
+            latitude: restoredFormData.pickupLatitude ?? null,
+            longitude: restoredFormData.pickupLongitude ?? null,
+            placeId: restoredFormData.pickupPlaceId,
+            source: restoredFormData.pickupLocationSource ?? 'manual',
           });
-          dropoffField.setResolvedLocation(parsed.formData.dropoffLocation, {
-            latitude: parsed.formData.dropoffLatitude ?? null,
-            longitude: parsed.formData.dropoffLongitude ?? null,
-            placeId: parsed.formData.dropoffPlaceId,
-            source: parsed.formData.dropoffLocationSource ?? 'manual',
+          dropoffField.setResolvedLocation(restoredFormData.dropoffLocation, {
+            latitude: restoredFormData.dropoffLatitude ?? null,
+            longitude: restoredFormData.dropoffLongitude ?? null,
+            placeId: restoredFormData.dropoffPlaceId,
+            source: restoredFormData.dropoffLocationSource ?? 'manual',
           });
         }
         if (parsed.bookingMode) setBookingMode(parsed.bookingMode);
@@ -685,7 +724,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         if (parsed.pickupTime) setPickupTime(parsed.pickupTime);
         if (parsed.returnDate) setReturnDate(parsed.returnDate);
         if (parsed.returnTime) setReturnTime(parsed.returnTime);
-        if (parsed.selectedRide) setSelectedRide(parsed.selectedRide);
+        if (parsed.selectedRide) setSelectedRide(ACTIVE_CUSTOMER_RIDE);
         if (parsed.priceQuote) setPriceQuote(parsed.priceQuote);
       } catch {
         window.localStorage.removeItem(GOOGLE_BOOKING_DRAFT_KEY);
@@ -820,14 +859,18 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       window.localStorage.setItem(
         GOOGLE_BOOKING_DRAFT_KEY,
         JSON.stringify({
-          formData,
+          formData: {
+            ...formData,
+            carType: ACTIVE_CUSTOMER_RIDE,
+            fareAmount: priceQuote ? getRideFare(priceQuote, ACTIVE_CUSTOMER_RIDE) : formData.fareAmount,
+          },
           bookingMode,
           pickupTiming,
           pickupDate,
           pickupTime,
           returnDate,
           returnTime,
-          selectedRide,
+          selectedRide: ACTIVE_CUSTOMER_RIDE,
           priceQuote,
         })
       );
@@ -1100,6 +1143,18 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     setBookingError(null);
     setAuthError(null);
 
+    if (selectedRide !== ACTIVE_CUSTOMER_RIDE) {
+      setSelectedRide(ACTIVE_CUSTOMER_RIDE);
+      setFormData((prev) => ({
+        ...prev,
+        carType: ACTIVE_CUSTOMER_RIDE,
+        fareAmount: priceQuote ? getRideFare(priceQuote, ACTIVE_CUSTOMER_RIDE) : prev.fareAmount,
+      }));
+      setBookingError('Miles XL is coming soon. Please book Miles Eco for now.');
+      setIsSubmitting(false);
+      return;
+    }
+
     if (authStep !== 'otp' || !customerProfile.fullName.trim()) {
       setBookingError('Verify your phone before booking.');
       setIsSubmitting(false);
@@ -1363,6 +1418,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         otpSent={otpSent}
         pickupDisplayTime={pickupDisplayTime}
         pickupTiming={pickupTiming}
+        priceQuote={priceQuote}
         profileErrors={profileErrors}
         returnDateTime={returnDateTime}
         rideOptions={rideOptions}
@@ -1750,6 +1806,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         otpSent={otpSent}
         pickupDisplayTime={pickupDisplayTime}
         pickupTiming={pickupTiming}
+        priceQuote={priceQuote}
         profileErrors={profileErrors}
         returnDateTime={returnDateTime}
         rideOptions={rideOptions}
@@ -1974,6 +2031,8 @@ type RideSelectionOption = {
   description: string;
   eta: string;
   fare: number;
+  priceLabel?: string;
+  disabled?: boolean;
 };
 
 interface RideSelectionViewProps {
@@ -2003,6 +2062,7 @@ interface RideSelectionViewProps {
   otpSent: boolean;
   pickupDisplayTime: string;
   pickupTiming: PickupTiming;
+  priceQuote: FixedRoutePrice;
   profileErrors: Partial<Record<keyof CustomerProfile, string>>;
   returnDateTime: string;
   rideOptions: RideSelectionOption[];
@@ -2037,6 +2097,7 @@ function RideSelectionView({
   otpSent,
   pickupDisplayTime,
   pickupTiming,
+  priceQuote,
   profileErrors,
   returnDateTime,
   rideOptions,
@@ -2044,7 +2105,16 @@ function RideSelectionView({
   totalPrice,
 }: RideSelectionViewProps) {
   const selectedRideOption =
-    rideOptions.find((option) => option.value === selectedRide) ?? rideOptions[0];
+    rideOptions.find((option) => option.value === selectedRide && !option.disabled) ??
+    rideOptions.find((option) => option.value === ACTIVE_CUSTOMER_RIDE) ??
+    rideOptions[0];
+  const overrideDebug = priceQuote.overrideDebug;
+  const overrideDebugLabel =
+    priceQuote.priceSource === 'override'
+      ? `Override matched: ${formatDebugCityName(overrideDebug?.pickupCity ?? priceQuote.pickupCity)} ↔ ${formatDebugCityName(
+          overrideDebug?.dropoffCity ?? priceQuote.dropoffCity
+        )}`
+      : 'No override matched';
 
   return (
     <main className="min-h-[calc(100vh-72px)] overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white lg:h-full lg:min-h-0 lg:overflow-hidden">
@@ -2069,7 +2139,7 @@ function RideSelectionView({
               </p>
             </div>
 
-            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
+            <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h3 className="text-sm font-black uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
                   Trip summary
@@ -2104,53 +2174,88 @@ function RideSelectionView({
               </div>
             </div>
 
+            <div
+              className={cn(
+                'rounded-[18px] border px-4 py-3 text-sm font-black',
+                priceQuote.priceSource === 'override'
+                  ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-300/40 dark:bg-amber-400/10 dark:text-amber-200'
+                  : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'
+              )}
+            >
+              {overrideDebugLabel}
+            </div>
+
             <div className="space-y-3">
               {rideOptions.map((option) => {
-                const isSelected = selectedRide === option.value;
+                const isDisabled = Boolean(option.disabled);
+                const isSelected = selectedRide === option.value && !isDisabled;
 
                 return (
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => onRideSelect(option.value)}
+                    onClick={() => {
+                      if (!isDisabled) {
+                        onRideSelect(option.value);
+                      }
+                    }}
+                    disabled={isDisabled}
+                    aria-disabled={isDisabled}
                     className={cn(
-                      'group flex w-full items-center gap-4 rounded-[24px] border p-4 text-left transition-all',
-                      isSelected
-                        ? 'border-amber-400 bg-amber-50 shadow-lg shadow-amber-500/10 ring-2 ring-amber-300/40 dark:border-amber-300 dark:bg-amber-400/10 dark:ring-amber-300/20'
+                      'group relative flex w-full items-center gap-4 overflow-hidden rounded-[24px] border p-4 text-left transition-all',
+                      isDisabled
+                        ? 'cursor-not-allowed border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950'
+                        : isSelected
+                        ? 'border-amber-400 bg-zinc-950 dark:border-amber-300 dark:bg-zinc-950'
                         : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900'
                     )}
                   >
+                    {isDisabled && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 px-4 text-center backdrop-blur-[1px] dark:bg-zinc-950/70">
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-5 py-2 text-sm font-black uppercase tracking-[0.18em] text-amber-800 shadow-sm dark:border-amber-300/40 dark:bg-amber-400/15 dark:text-amber-200">
+                          Coming Soon
+                        </span>
+                      </div>
+                    )}
                     <div className={cn(
                       'flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border',
                       isSelected
-                        ? 'border-amber-300 bg-white text-zinc-950 dark:bg-zinc-950 dark:text-amber-200'
-                        : 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200'
+                        ? 'border-amber-300 bg-amber-400 text-zinc-950'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200',
+                      isDisabled && 'opacity-35'
                     )}>
                       <Car className="h-7 w-7" aria-hidden="true" />
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className={cn('min-w-0 flex-1', isDisabled && 'opacity-35')}>
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-black text-zinc-950 dark:text-white">{option.name}</h3>
-                        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                        <h3 className={cn('text-lg font-black text-zinc-950 dark:text-white', isSelected && 'text-white')}>
+                          {option.name}
+                        </h3>
+                        <span className={cn(
+                          'rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300',
+                          isSelected && 'bg-amber-400 text-zinc-950 dark:bg-amber-400 dark:text-zinc-950'
+                        )}>
                           {option.badge}
                         </span>
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                      <div className={cn(
+                        'mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-zinc-500 dark:text-zinc-400',
+                        isSelected && 'text-zinc-300 dark:text-zinc-300'
+                      )}>
                         <span className="inline-flex items-center gap-1">
                           <Users className="h-3.5 w-3.5" aria-hidden="true" />
                           {option.passengers} passengers
                         </span>
                         <span>{option.eta} pickup</span>
                       </div>
-                      <p className="mt-1 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                      <p className={cn('mt-1 text-sm font-medium text-zinc-600 dark:text-zinc-400', isSelected && 'text-zinc-200 dark:text-zinc-200')}>
                         {option.description}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-lg font-black text-zinc-950 dark:text-white">
-                        {formatMoney(option.fare)}
+                    <div className={cn('shrink-0 text-right', isDisabled && 'opacity-0')}>
+                      <p className={cn('text-lg font-black text-zinc-950 dark:text-white', isSelected && 'text-white')}>
+                        {option.priceLabel ?? formatMoney(option.fare)}
                       </p>
-                      <ChevronRight className="ml-auto mt-1 h-5 w-5 text-zinc-400 transition-transform group-hover:translate-x-0.5 dark:text-zinc-500" aria-hidden="true" />
                     </div>
                   </button>
                 );
@@ -2263,8 +2368,8 @@ function RideSelectionView({
             )}
           </div>
 
-          <div className="sticky bottom-0 border-t border-zinc-200 bg-white/95 p-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 sm:px-6">
-            <div className="flex flex-col gap-3 rounded-[24px] border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/80 sm:flex-row sm:items-center sm:justify-between">
+          <div className="sticky bottom-0 border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+            <div className="flex flex-col gap-3 rounded-[24px] border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-zinc-800 dark:bg-zinc-950 dark:text-amber-200">
                   <CreditCard className="h-5 w-5" aria-hidden="true" />
@@ -2274,7 +2379,7 @@ function RideSelectionView({
                     Pay in car
                   </p>
                   <p className="truncate text-sm font-bold text-zinc-950 dark:text-white">
-                    {selectedRideOption?.name ?? 'Miles Eco'} · {formatMoney(totalPrice)}
+                    {selectedRideOption?.name ?? 'Miles Eco'} selected
                   </p>
                 </div>
               </div>
@@ -2282,9 +2387,11 @@ function RideSelectionView({
                 type="button"
                 onClick={onBookNow}
                 disabled={isSubmitting}
-                className="flex min-h-12 shrink-0 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-black text-white shadow-xl shadow-zinc-950/15 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+                className="flex min-h-12 shrink-0 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-black text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
               >
-                {isSubmitting ? 'Booking...' : `Confirm ${selectedRideOption?.name ?? 'Miles Eco'}`}
+                {isSubmitting
+                  ? 'Booking...'
+                  : `Confirm ${selectedRideOption?.name ?? 'Miles Eco'} • ${formatMoney(totalPrice)}`}
               </button>
             </div>
           </div>
@@ -2517,7 +2624,7 @@ function RideMapPreview({
   return (
     <div className="relative h-full min-h-[360px] overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" />
-      <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-[24px] border border-white/70 bg-white/95 p-4 shadow-2xl shadow-zinc-950/20 backdrop-blur dark:border-zinc-800/90 dark:bg-zinc-950/95">
+      <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-[24px] border border-zinc-200 bg-white p-4 shadow-xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/25">
         <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <RouteInfoItem label="Pickup" value={pickupDisplayTime} />
           <RouteInfoItem
@@ -2928,7 +3035,22 @@ function getManualPinConfirmationLabel(selection: ManualPinSelection) {
   );
 }
 
-async function getRoutePriceQuote(pickupLocation: string, dropoffLocation: string): Promise<FixedRoutePrice | null> {
+async function getRoutePriceQuote(
+  pickupLocation: string,
+  dropoffLocation: string
+): Promise<FixedRoutePrice | null> {
+  const publicOverrides = await loadPublicTripOverridesForPricing();
+  const clientOverrideMatch = matchTripOverride(publicOverrides, pickupLocation, dropoffLocation);
+  const clientOverrideDebug = createTripOverrideDebugInfo({
+    overrides: publicOverrides,
+    pickupAddress: pickupLocation,
+    dropoffAddress: dropoffLocation,
+    match: clientOverrideMatch,
+    finalFareSource: clientOverrideMatch ? 'override' : 'calculated',
+  });
+
+  logTripOverrideDebug('client preflight before fare display', clientOverrideDebug);
+
   try {
     const response = await fetch('/api/pricing/outstation', {
       method: 'POST',
@@ -2944,23 +3066,107 @@ async function getRoutePriceQuote(pickupLocation: string, dropoffLocation: strin
       !quote.customPricingRequired &&
       typeof quote.sedanPrice === 'number'
     ) {
-      return {
+      const serverQuote: FixedRoutePrice = {
         pickupCity: quote.pickupCity ?? normalizeRouteLabel(pickupLocation),
         dropoffCity: quote.dropoffCity ?? normalizeRouteLabel(dropoffLocation),
         sedanPrice: quote.sedanPrice,
         suvMarkup: quote.suvMarkup ?? 1000,
         routeId: quote.routeId,
+        priceSource: quote.priceSource ?? 'route',
+        tripOverrideId: quote.tripOverrideId ?? null,
+        overrideDebug: quote.overrideDebug ?? clientOverrideDebug,
       };
+
+      if (clientOverrideMatch) {
+        return buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug);
+      }
+
+      console.info('[Trip Override] final customer fare source', serverQuote.priceSource ?? 'calculated');
+      return serverQuote;
     }
 
-    if (quote?.customPricingRequired) {
+    if (quote?.customPricingRequired && !clientOverrideMatch) {
       return null;
     }
-  } catch {
+  } catch (error) {
+    console.info('[Trip Override] public quote API failed before final fare layer', error);
     // Static fallback keeps existing fixed-route behavior available if the quote API is offline.
   }
 
-  return getFixedRoutePrice(pickupLocation, dropoffLocation);
+  if (clientOverrideMatch) {
+    return buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug);
+  }
+
+  const staticQuote = getFixedRoutePrice(pickupLocation, dropoffLocation);
+  return staticQuote ? { ...staticQuote, overrideDebug: clientOverrideDebug } : null;
+}
+
+function buildTripOverridePriceQuote(
+  match: TripOverrideMatch,
+  overrideDebug: TripOverrideDebugInfo
+): FixedRoutePrice {
+  const sedanPrice = getTripOverrideSedanPrice(match.override);
+  const nextDebug: TripOverrideDebugInfo = {
+    ...overrideDebug,
+    matchedOverrideId: match.override.id,
+    matchedDirection: match.matchedDirection,
+    finalFareSource: 'override',
+  };
+
+  console.info('[Trip Override] final customer fare source', 'override');
+
+  return {
+    pickupCity: match.pickupCity,
+    dropoffCity: match.dropoffCity,
+    sedanPrice,
+    suvMarkup: getTripOverrideMilesXlMarkupAmount(match.override),
+    routeId: null,
+    priceSource: 'override',
+    tripOverrideId: match.override.id,
+    overrideDebug: nextDebug,
+  };
+}
+
+async function loadPublicTripOverridesForPricing(): Promise<TripOverride[]> {
+  let apiOverrides: TripOverride[] = [];
+
+  try {
+    const response = await fetch('/api/pricing/trip-overrides', { cache: 'no-store' });
+    const data = (await response.json()) as { data?: unknown; error?: string };
+
+    if (response.ok) {
+      apiOverrides = sanitizeTripOverrides(data.data);
+    } else {
+      console.info('[Trip Override] public overrides API error', data.error ?? response.statusText);
+    }
+  } catch (error) {
+    console.info('[Trip Override] public overrides API failed', error);
+  }
+
+  const browserOverrides = readBrowserTripOverrides();
+  const overrides = apiOverrides.length > 0 ? apiOverrides : browserOverrides;
+
+  console.info('[Trip Override] loaded overrides for customer pricing', {
+    source: apiOverrides.length > 0 ? '/api/pricing/trip-overrides' : 'localStorage fallback',
+    apiOverrideCount: apiOverrides.length,
+    browserOverrideCount: browserOverrides.length,
+    overrides,
+  });
+
+  return overrides;
+}
+
+function readBrowserTripOverrides() {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const storedTripOverrides = window.localStorage.getItem(TRIP_OVERRIDE_STORAGE_KEY);
+    return storedTripOverrides ? sanitizeTripOverrides(JSON.parse(storedTripOverrides)) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<FixedRoutePrice | null> {
@@ -2968,15 +3174,17 @@ async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<Fix
   const hasManualPin =
     formData.pickupLocationSource === 'manual_pin' ||
     formData.dropoffLocationSource === 'manual_pin';
+  const routeQuote = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
+
+  if (routeQuote?.priceSource === 'override') {
+    return routeQuote;
+  }
 
   if (hasManualPin && coordinateQuote) {
     return coordinateQuote;
   }
 
-  return (
-    (await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation)) ??
-    coordinateQuote
-  );
+  return routeQuote ?? coordinateQuote;
 }
 
 function normalizeRouteLabel(value: string) {
@@ -3017,6 +3225,8 @@ function getCoordinateFallbackPriceQuote(formData: BookingFormData): FixedRouteP
     sedanPrice,
     suvMarkup: 1000,
     routeId: null,
+    priceSource: 'coordinate',
+    tripOverrideId: null,
   };
 }
 
@@ -3059,7 +3269,24 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
+function formatDebugCityName(value: string | null | undefined) {
+  const cleanedValue = (value ?? '').replace(/\s+/g, ' ').trim();
+
+  if (!cleanedValue) {
+    return 'Unknown';
+  }
+
+  return cleanedValue
+    .split(' ')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function getRideFare(priceQuote: FixedRoutePrice, ride: RideOption) {
+  if (ride !== ACTIVE_CUSTOMER_RIDE) {
+    return priceQuote.sedanPrice;
+  }
+
   return getOutstationVehicleFare(priceQuote.sedanPrice, ride, priceQuote.suvMarkup ?? 1000);
 }
 
@@ -3082,10 +3309,12 @@ function buildRideOptions(priceQuote: FixedRoutePrice | null): RideSelectionOpti
       value: 'VAN',
       name: 'Miles XL',
       passengers: 6,
-      badge: 'Larger vehicle',
+      badge: 'Coming Soon',
       description: 'Roomier option for families and larger groups.',
       eta: '12 min',
-      fare: getRideFare(priceQuote, 'VAN'),
+      fare: 0,
+      priceLabel: 'Coming Soon',
+      disabled: true,
     },
   ];
 }

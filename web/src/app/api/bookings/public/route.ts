@@ -19,6 +19,13 @@ import {
   bookingLocationMetadataSchema,
   toPrismaBookingLocationSource,
 } from '@/lib/bookingLocation';
+import { readTripOverrides } from '@/lib/tripOverrideStore';
+import {
+  createTripOverrideDebugInfo,
+  getTripOverrideSedanPrice,
+  logTripOverrideDebug,
+  matchTripOverride,
+} from '@/lib/tripOverrides';
 
 const publicBookingSelect = {
   publicBookingId: true,
@@ -61,8 +68,8 @@ const bookingSchema = z.object({
   pickupDateTime: z.string().min(1, 'Please select pickup date and time'),
   returnPickupDateTime: z.string().optional(),
   bookingMode: z.enum(['ONE_WAY', 'ROUND_TRIP']).optional(),
-  carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val !== undefined, {
-    message: 'Please select a vehicle type',
+  carType: z.enum(['SEDAN', 'SUV', 'VAN', 'LUXURY']).refine((val) => val === 'SEDAN', {
+    message: 'Miles XL is coming soon. Please book Miles Eco for now.',
   }),
   fareAmount: z.number().positive().optional(),
   specialInstructions: z.string().optional(),
@@ -151,6 +158,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const tripOverrides = await readTripOverrides();
+    const tripOverrideMatch = matchTripOverride(
+      tripOverrides,
+      pickupLocation,
+      dropoffLocation
+    );
+    const tripOverrideFare = tripOverrideMatch
+      ? getTripOverrideSedanPrice(tripOverrideMatch.override)
+      : null;
+    logTripOverrideDebug(
+      'server booking save',
+      createTripOverrideDebugInfo({
+        overrides: tripOverrides,
+        pickupAddress: pickupLocation,
+        dropoffAddress: dropoffLocation,
+        match: tripOverrideMatch,
+        finalFareSource: tripOverrideFare !== null ? 'override' : 'calculated',
+      })
+    );
+
     const bookings = await prisma.$transaction(async (tx) => {
       const normalizedPhone = normalizeCustomerPhone(phone);
       const ipAddress = getClientIp(request);
@@ -202,7 +229,7 @@ export async function POST(request: NextRequest) {
       const baseId = crypto.randomUUID();
       const baseReference = createBookingReference(baseId, pickupAt);
       const basePublicBookingId = await createBasePublicBookingId(tx, pickupAt);
-      const legPrice = fareAmount ?? null;
+      const legPrice = tripOverrideFare ?? fareAmount ?? null;
       const commonData = {
         bookingType,
         fullName,

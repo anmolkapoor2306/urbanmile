@@ -63,6 +63,7 @@ web/out/
 .env.local
 web/.env
 web/.env.local
+web/.data/
 
 # logs
 npm-debug.log*

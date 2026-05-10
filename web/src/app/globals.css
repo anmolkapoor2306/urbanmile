@@ -54,6 +54,17 @@ dark {
   background: #52525b;
 }
 
+.pricing-engine-page .pricing-engine-number-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.pricing-engine-page .pricing-engine-number-input::-webkit-outer-spin-button,
+.pricing-engine-page .pricing-engine-number-input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
 input[type="date"],
 input[type="time"] {
   appearance: auto;

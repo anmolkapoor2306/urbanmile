@@ -10,6 +10,7 @@ import {
   type TripClassification,
   type TripType,
 } from '@/lib/outstationPricing';
+import type { TripOverrideDebugInfo } from '@/lib/tripOverrides';
 
 export type FixedRoutePrice = {
   pickupCity: string;
@@ -17,6 +18,9 @@ export type FixedRoutePrice = {
   sedanPrice: number;
   suvMarkup?: number;
   routeId?: string | null;
+  priceSource?: 'override' | 'route' | 'coordinate' | 'static' | 'calculated';
+  tripOverrideId?: string | null;
+  overrideDebug?: TripOverrideDebugInfo;
 };
 
 export type {
@@ -90,5 +94,7 @@ export function getFixedRoutePrice(
       sedanPrice: quote.sedanPrice,
       suvMarkup: quote.suvMarkup ?? 1000,
       routeId: quote.routeId,
+      priceSource: 'static',
+      tripOverrideId: null,
     };
   }

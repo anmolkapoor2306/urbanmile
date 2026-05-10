@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
 import prisma from '@/lib/prisma';
-import { driverRecordSelect, serializeDriver } from '@/lib/driverRecord';
-import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
+import { driverRecordSelect, serializeDriver, type DriverRecord } from '@/lib/driverRecord';
+import { bookingRecordSelect, serializeBooking, type BookingRecord } from '@/lib/bookingRecord';
 import { backfillDriverCodes } from '@/lib/driverCode';
 import { AdminPageFrame, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
 import { DriverManagementTable } from '@/components/admin/DriverManagementTable';
@@ -30,21 +30,16 @@ export default async function DriversPage() {
     );
   }
 
-  const [driversResult, bookingsResult] = await Promise.allSettled([
-    prisma.driver.findMany({
+  let drivers: DriverRecord[];
+  let bookings: BookingRecord[] = [];
+
+  try {
+    drivers = await prisma.driver.findMany({
       select: driverRecordSelect,
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-    }),
-    prisma.booking.findMany({
-      where: { status: { in: ['ASSIGNED', 'ACTIVE'] } },
-      select: bookingRecordSelect,
-      orderBy: [{ pickupDateTime: 'asc' }],
-      take: 500,
-    }),
-  ]);
-
-  if (driversResult.status === 'rejected') {
-    console.error('Failed to load drivers:', driversResult.reason);
+    });
+  } catch (error) {
+    console.error('Failed to load drivers:', error);
 
     return (
       <AdminPageFrame currentPage="drivers">
@@ -56,12 +51,16 @@ export default async function DriversPage() {
     );
   }
 
-  if (bookingsResult.status === 'rejected') {
-    console.error('Failed to load active driver bookings:', bookingsResult.reason);
+  try {
+    bookings = await prisma.booking.findMany({
+      where: { status: { in: ['ASSIGNED', 'ACTIVE'] } },
+      select: bookingRecordSelect,
+      orderBy: [{ pickupDateTime: 'asc' }],
+      take: 500,
+    });
+  } catch (error) {
+    console.error('Failed to load active driver bookings:', error);
   }
-
-  const drivers = driversResult.value;
-  const bookings = bookingsResult.status === 'fulfilled' ? bookingsResult.value : [];
 
   const serializedDrivers = drivers.map(serializeDriver);
   const serializedBookings = bookings.map(serializeBooking);
