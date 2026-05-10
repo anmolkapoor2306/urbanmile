@@ -360,7 +360,8 @@ export function PricingEngineClient() {
       setTripOverrides(savedOverrides);
       window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
       cancelTripOverrideForm();
-    } catch {
+    } catch (error) {
+      console.error('[Trip Override UI] save failed', error);
       setTripOverrideError('Could not save trip override. Please try again.');
     }
   }
@@ -394,7 +395,8 @@ export function PricingEngineClient() {
       setTripOverrideError('');
       setTripOverrides(savedOverrides);
       window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
-    } catch {
+    } catch (error) {
+      console.error('[Trip Override UI] update failed', error);
       setTripOverrideError('Could not update trip override. Please try again.');
     }
   }
@@ -2214,18 +2216,44 @@ async function loadTripOverridesFromServer() {
 }
 
 async function saveTripOverridesToServer(overrides: TripOverride[]) {
+  const payload = overrides.map(toTripOverrideApiPayload);
+
+  console.info('[Trip Override UI] PUT /api/admin/trip-overrides request', {
+    count: payload.length,
+    overrides: payload,
+  });
+
   const response = await fetch('/api/admin/trip-overrides', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ overrides }),
+    body: JSON.stringify({ overrides: payload }),
   });
   const data = (await response.json()) as { data?: unknown; error?: string };
+  console.info('[Trip Override UI] PUT /api/admin/trip-overrides response', {
+    status: response.status,
+    ok: response.ok,
+    error: data.error,
+    data,
+  });
 
   if (!response.ok) {
     throw new Error(data.error ?? 'Could not save trip overrides');
   }
 
   return sanitizeTripOverrides(data.data);
+}
+
+function toTripOverrideApiPayload(override: TripOverride) {
+  return {
+    id: override.id,
+    fromCity: override.fromCity,
+    toCity: override.toCity,
+    sedanPrice: override.fixedPrice,
+    milesXlMarkup: override.milesXlMarkupValue,
+    milesXlMarkupType: override.milesXlMarkupType,
+    reverseRoute: override.includeReverse,
+    active: override.isActive,
+  };
 }
 
 function handleNumberInputWheel(event: WheelEvent<HTMLInputElement>) {

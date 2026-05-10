@@ -212,6 +212,25 @@ model OutstationRoute {
   @@index([isActive])
 }
 
+model TripOverride {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromCity             String
+  toCity               String
+  normalizedFromCity   String
+  normalizedToCity     String
+  sedanPrice           Decimal  @db.Decimal(10, 2)
+  milesXlMarkup        Decimal  @default(0) @db.Decimal(10, 2)
+  milesXlMarkupType    String   @default("percentage")
+  reverseRoute         Boolean  @default(true)
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@index([normalizedFromCity])
+  @@index([normalizedToCity])
+  @@index([active])
+}
+
 enum BookingStatus {
   NEW
   CONFIRMED

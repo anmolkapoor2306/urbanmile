@@ -83,8 +83,11 @@ export function sanitizeTripOverrideDraft(value: Partial<TripOverrideDraft>): Tr
   const legacyValue = value as Partial<TripOverrideDraft> & {
     basePrice?: unknown;
     sedanPrice?: unknown;
+    milesXlMarkup?: unknown;
     vehicleMarkupType?: unknown;
     vehicleMarkupValue?: unknown;
+    reverseRoute?: boolean;
+    active?: boolean;
   };
 
   return {
@@ -95,9 +98,11 @@ export function sanitizeTripOverrideDraft(value: Partial<TripOverrideDraft>): Tr
       value.milesXlMarkupType ?? legacyValue.vehicleMarkupType
     ),
     milesXlMarkupValue:
-      sanitizeNumericInputDraft(value.milesXlMarkupValue ?? legacyValue.vehicleMarkupValue) || '0',
-    includeReverse: value.includeReverse ?? true,
-    isActive: value.isActive ?? true,
+      sanitizeNumericInputDraft(
+        value.milesXlMarkupValue ?? legacyValue.milesXlMarkup ?? legacyValue.vehicleMarkupValue
+      ) || '0',
+    includeReverse: value.includeReverse ?? legacyValue.reverseRoute ?? true,
+    isActive: value.isActive ?? legacyValue.active ?? true,
   };
 }
 
@@ -302,11 +307,11 @@ export function calculateTripOverrideMilesXlPrice(override: TripOverride) {
       ? sedanPrice + (sedanPrice * markup) / 100
       : sedanPrice + markup;
 
-  return Math.max(0, finalPrice);
+  return roundCurrency(Math.max(0, finalPrice));
 }
 
 export function getTripOverrideMilesXlMarkupAmount(override: TripOverride) {
-  return Math.max(0, calculateTripOverrideMilesXlPrice(override) - getTripOverrideSedanPrice(override));
+  return roundCurrency(Math.max(0, calculateTripOverrideMilesXlPrice(override) - getTripOverrideSedanPrice(override)));
 }
 
 export function formatTripOverrideMilesXlMarkup(override: Pick<TripOverride, 'milesXlMarkupType' | 'milesXlMarkupValue'>) {
@@ -410,4 +415,8 @@ function formatCompactNumber(value: number) {
   return new Intl.NumberFormat('en-IN', {
     maximumFractionDigits: 2,
   }).format(getTripOverridePrice(value));
+}
+
+function roundCurrency(value: number) {
+  return Math.round(value * 100) / 100;
 }
