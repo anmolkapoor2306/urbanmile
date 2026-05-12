@@ -19,13 +19,15 @@ export const adminPanelHeaderClassName = 'mb-4 flex shrink-0 items-start justify
 export function AdminPageFrame({
   currentPage,
   children,
+  adminRole,
 }: {
   currentPage: DashboardPage;
   children: ReactNode;
+  adminRole?: string;
 }) {
   return (
     <div className="grid h-screen w-full max-w-full overflow-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-900 dark:text-zinc-100 lg:grid-cols-[auto_minmax(0,1fr)]">
-      <DashboardHeader currentPage={currentPage} />
+      <DashboardHeader currentPage={currentPage} adminRole={adminRole} />
 
       <main className="h-screen min-w-0 overflow-hidden">
         <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden px-4 pb-4 pt-16 sm:px-6 lg:px-6 lg:py-5 xl:px-8">

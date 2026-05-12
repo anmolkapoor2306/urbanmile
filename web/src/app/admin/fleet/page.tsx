@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import { AdminPageFrame } from '@/components/admin/AdminLayout';
 import { FleetManagementClient } from './FleetManagementClient';
 
@@ -10,8 +11,11 @@ export default async function FleetPage() {
     redirect('/admin/login');
   }
 
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'fleet')) redirect('/admin/forbidden');
+
   return (
-    <AdminPageFrame currentPage="fleet">
+    <AdminPageFrame currentPage="fleet" adminRole={session?.role}>
       <FleetManagementClient />
     </AdminPageFrame>
   );

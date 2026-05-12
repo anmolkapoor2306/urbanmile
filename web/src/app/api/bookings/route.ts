@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { hasPermission } from '@/lib/authPermissions';
 import { BOOKING_STATUSES } from '@/lib/dispatch';
 import { bookingRecordSelect, createBookingReference, serializeBooking } from '@/lib/bookingRecord';
 import {
@@ -38,8 +39,9 @@ const bookingSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'bookings:read')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const { searchParams } = new URL(request.url);
@@ -58,38 +60,26 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json(
-      {
-        success: true,
-        data: bookings.map(serializeBooking),
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
+      { success: true, data: bookings.map(serializeBooking) },
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch (error) {
     console.error('Error fetching bookings:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch bookings' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'bookings:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const body = await request.json();
-    const result = bookingSchema.safeParse(body);
+    const parsed = bookingSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map(i => i.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map(i => i.message).join(', ') }, { status: 400 });
     }
 
     const {
@@ -110,16 +100,12 @@ export async function POST(request: NextRequest) {
       dropoffLongitude,
       dropoffPlaceId,
       dropoffLocationSource,
-    } = result.data;
+    } = parsed.data;
     const pickupAt = new Date(pickupDateTime);
 
     const booking = await prisma.$transaction(async (tx) => {
       const id = crypto.randomUUID();
-      const customer = await getOrCreateBookingCustomer(tx, {
-        name: fullName,
-        phone,
-        email,
-      });
+      const customer = await getOrCreateBookingCustomer(tx, { name: fullName, phone, email });
 
       return tx.booking.create({
         data: {
@@ -152,19 +138,12 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      {
-        success: true,
-        message: 'Booking created successfully',
-        data: serializeBooking(booking),
-      },
+      { success: true, message: 'Booking created successfully', data: serializeBooking(booking) },
       { status: 201 }
     );
   } catch (error) {
     console.error('Error creating booking:', error);
-    return NextResponse.json(
-      { error: 'Failed to create booking' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
   }
 }
 

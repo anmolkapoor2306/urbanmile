@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 import { AdminPageFrame, AdminPanel, AdminStatsGrid, AdminStatCard } from '@/components/admin/AdminLayout';
@@ -14,6 +15,9 @@ export default async function AdminBookingsPage() {
     redirect('/admin/login');
   }
 
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'bookings')) redirect('/admin/forbidden');
+
   let bookings;
 
   try {
@@ -26,7 +30,7 @@ export default async function AdminBookingsPage() {
     console.error('Failed to load admin bookings:', error);
 
     return (
-      <AdminPageFrame currentPage="bookings">
+      <AdminPageFrame currentPage="bookings" adminRole={session?.role}>
         <AdminEmptyState
           title="Bookings are temporarily unavailable"
           description="Booking data is temporarily unavailable. Please check database connection."
@@ -41,7 +45,7 @@ export default async function AdminBookingsPage() {
   const activeCount = activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[3]).length;
 
   return (
-    <AdminPageFrame currentPage="bookings">
+    <AdminPageFrame currentPage="bookings" adminRole={session?.role}>
       <div className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden">
         <AdminStatsGrid className="md:grid-cols-3 xl:grid-cols-6">
               {[

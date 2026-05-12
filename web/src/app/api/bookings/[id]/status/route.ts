@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { hasPermission } from '@/lib/authPermissions';
 import { BOOKING_STATUSES } from '@/lib/dispatch';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 
@@ -23,19 +24,17 @@ function buildStatusUpdateData(status: (typeof BOOKING_STATUSES)[number]) {
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const error = requireAdminAuth(request);
-  if (error) return error;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'bookings:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const result = statusUpdateSchema.safeParse(body);
+    const parsed = statusUpdateSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: 'Validation failed', details: result.error.issues },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
     }
 
     const existingBooking = await prisma.booking.findUnique({
@@ -44,27 +43,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     });
 
     if (!existingBooking) {
-      return NextResponse.json(
-        { error: 'Booking not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
     const booking = await prisma.$transaction(async (tx) => {
       const updated = await tx.booking.update({
         where: { id },
-        data: buildStatusUpdateData(result.data.status),
+        data: buildStatusUpdateData(parsed.data.status),
         select: bookingRecordSelect,
       });
 
-      if (existingBooking.driverId && (result.data.status === 'ASSIGNED' || result.data.status === 'ACTIVE')) {
+      if (existingBooking.driverId && (parsed.data.status === 'ASSIGNED' || parsed.data.status === 'ACTIVE')) {
         await tx.driver.update({
           where: { id: existingBooking.driverId },
           data: { availabilityStatus: 'BUSY' },
         });
       }
 
-      if (existingBooking.driverId && (result.data.status === 'COMPLETED' || result.data.status === 'CANCELLED')) {
+      if (existingBooking.driverId && (parsed.data.status === 'COMPLETED' || parsed.data.status === 'CANCELLED')) {
         await releaseDriverIfIdle(tx, existingBooking.driverId, existingBooking.id);
       }
 
@@ -77,11 +73,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       data: serializeBooking(booking),
     });
   } catch (error) {
-      console.error('Error updating booking status:', error);
-      return NextResponse.json(
-        { error: 'Failed to update booking status' },
-        { status: 500 }
-      );
+    console.error('Error updating booking status:', error);
+    return NextResponse.json({ error: 'Failed to update booking status' }, { status: 500 });
   }
 }
 

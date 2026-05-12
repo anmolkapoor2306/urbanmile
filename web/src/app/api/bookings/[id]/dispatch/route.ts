@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { hasPermission } from '@/lib/authPermissions';
 import { BOOKING_STATUSES, PAYMENT_STATUSES } from '@/lib/dispatch';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
 
@@ -78,19 +79,17 @@ function deriveFinancials({
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'dispatch:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const result = dispatchUpdateSchema.safeParse(body);
+    const parsed = dispatchUpdateSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map((issue) => issue.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
     const booking = await prisma.booking.findUnique({
@@ -115,14 +114,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     let assignmentType = booking.assignmentType;
     let assignedDriverId: string | null | undefined;
 
-    if (result.data.driverId !== undefined) {
-      if (result.data.driverId === null) {
+    if (parsed.data.driverId !== undefined) {
+      if (parsed.data.driverId === null) {
         data.driverId = null;
         data.assignedAt = null;
         assignmentType = null;
       } else {
         const driver = await prisma.driver.findFirst({
-          where: { id: result.data.driverId, isActive: true },
+          where: { id: parsed.data.driverId, isActive: true },
           select: { id: true, driverType: true, availabilityStatus: true },
         });
 
@@ -160,39 +159,39 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       }
     }
 
-    if (result.data.vendorId !== undefined) {
-      data.vendorId = result.data.vendorId;
+    if (parsed.data.vendorId !== undefined) {
+      data.vendorId = parsed.data.vendorId;
     }
 
-    if (result.data.vehicleId !== undefined) {
-      data.vehicleId = result.data.vehicleId;
+    if (parsed.data.vehicleId !== undefined) {
+      data.vehicleId = parsed.data.vehicleId;
     }
 
-    if (result.data.carType !== undefined) {
-      data.carType = result.data.carType;
+    if (parsed.data.carType !== undefined) {
+      data.carType = parsed.data.carType;
     }
 
-    if (result.data.manualVendorName !== undefined) {
-      data.manualVendorName = result.data.manualVendorName || null;
+    if (parsed.data.manualVendorName !== undefined) {
+      data.manualVendorName = parsed.data.manualVendorName || null;
     }
 
-    if (result.data.manualDriverName !== undefined) {
-      data.manualDriverName = result.data.manualDriverName || null;
+    if (parsed.data.manualDriverName !== undefined) {
+      data.manualDriverName = parsed.data.manualDriverName || null;
     }
 
-    if (result.data.manualDriverPhone !== undefined) {
-      data.manualDriverPhone = result.data.manualDriverPhone || null;
+    if (parsed.data.manualDriverPhone !== undefined) {
+      data.manualDriverPhone = parsed.data.manualDriverPhone || null;
     }
 
-    if (result.data.manualVehicleDetails !== undefined) {
-      data.manualVehicleDetails = result.data.manualVehicleDetails || null;
+    if (parsed.data.manualVehicleDetails !== undefined) {
+      data.manualVehicleDetails = parsed.data.manualVehicleDetails || null;
     }
 
     const hasManualOutsourceDetails = Boolean(
-      result.data.manualVendorName || result.data.manualDriverName || result.data.manualDriverPhone || result.data.manualVehicleDetails
+      parsed.data.manualVendorName || parsed.data.manualDriverName || parsed.data.manualDriverPhone || parsed.data.manualVehicleDetails
     );
 
-    if (!data.driverId && (result.data.vendorId || hasManualOutsourceDetails)) {
+    if (!data.driverId && (parsed.data.vendorId || hasManualOutsourceDetails)) {
       assignmentType = hasManualOutsourceDetails ? 'MANUAL_OUTSOURCED' : 'OUTSOURCED_DRIVER';
       data.assignedAt = data.assignedAt ?? new Date();
     }
@@ -201,8 +200,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       data.assignmentType = assignmentType;
     }
 
-    if (result.data.status) {
-      data.status = result.data.status;
+    if (parsed.data.status) {
+      data.status = parsed.data.status;
     } else if (assignmentType && booking.status !== 'ACTIVE' && booking.status !== 'COMPLETED') {
       data.status = 'ASSIGNED';
     }
@@ -211,7 +210,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       data.confirmedAt = new Date();
     }
 
-    if (data.status === 'ASSIGNED' && !booking.driverId && !data.driverId && !result.data.vendorId && !hasManualOutsourceDetails) {
+    if (data.status === 'ASSIGNED' && !booking.driverId && !data.driverId && !parsed.data.vendorId && !hasManualOutsourceDetails) {
       return NextResponse.json({ error: 'Assign a driver or vendor before marking as assigned' }, { status: 400 });
     }
 
@@ -225,19 +224,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (data.status === 'CANCELLED') {
       data.cancelledAt = new Date();
-      data.cancelReason = result.data.cancelReason || null;
+      data.cancelReason = parsed.data.cancelReason || null;
     }
 
-    if (result.data.paymentStatus) {
-      data.paymentStatus = result.data.paymentStatus;
-      if (result.data.paymentStatus === 'PAID') {
+    if (parsed.data.paymentStatus) {
+      data.paymentStatus = parsed.data.paymentStatus;
+      if (parsed.data.paymentStatus === 'PAID') {
         data.paymentReceivedAt = new Date();
       }
     }
 
-    if (result.data.fareAmount !== undefined) {
-      data.fareAmount = serializeMoney(result.data.fareAmount);
-      if (result.data.fareAmount !== null && booking.status === 'NEW' && !result.data.status) {
+    if (parsed.data.fareAmount !== undefined) {
+      data.fareAmount = serializeMoney(parsed.data.fareAmount);
+      if (parsed.data.fareAmount !== null && booking.status === 'NEW' && !parsed.data.status) {
         data.status = 'CONFIRMED';
         data.confirmedAt = new Date();
       }
@@ -245,10 +244,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     const financials = deriveFinancials({
       assignmentType,
-      fareAmount: result.data.fareAmount ?? (booking.fareAmount ? Number(booking.fareAmount) : null),
-      commissionAmount: result.data.commissionAmount,
-      payoutAmount: result.data.payoutAmount,
-      netEarningAmount: result.data.netEarningAmount,
+      fareAmount: parsed.data.fareAmount ?? (booking.fareAmount ? Number(booking.fareAmount) : null),
+      commissionAmount: parsed.data.commissionAmount,
+      payoutAmount: parsed.data.payoutAmount,
+      netEarningAmount: parsed.data.netEarningAmount,
     });
 
     data.commissionAmount = financials.commissionAmount;

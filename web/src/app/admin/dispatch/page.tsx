@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
 import { driverRecordSelect, serializeDriver, type DriverRecord } from '@/lib/driverRecord';
 import { bookingRecordSelect, serializeBooking, type BookingRecord } from '@/lib/bookingRecord';
@@ -11,6 +12,9 @@ export default async function DispatchPage() {
   if (!(await isCurrentAdminAuthenticated())) {
     redirect('/admin/login');
   }
+
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'dispatch')) redirect('/admin/forbidden');
 
   let drivers: DriverRecord[] = [];
   let bookings: BookingRecord[] = [];
@@ -43,6 +47,7 @@ export default async function DispatchPage() {
       drivers={drivers.map(serializeDriver)}
       bookings={bookings.map(serializeBooking)}
       loadError={loadError}
+      adminRole={session?.role}
     />
   );
 }

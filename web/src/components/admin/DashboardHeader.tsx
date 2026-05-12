@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { cn } from '@/lib/utils';
+import { canAccessPage, PAGE_PERMISSIONS } from '@/lib/authPermissions';
 
 export type DashboardPage =
   | 'dashboard'
@@ -34,26 +35,28 @@ export type DashboardPage =
   | 'reports'
   | 'settings';
 
-interface DashboardHeaderProps {
+export type DashboardHeaderProps = {
   currentPage: DashboardPage;
-}
+  adminRole?: string;
+};
 
 const navItems: Array<{
   key: DashboardPage;
   label: string;
   href: string;
   icon: typeof LayoutDashboard;
+  requiredPerm: 'dispatch' | 'bookings' | 'drivers' | 'fleet' | 'outstation-pricing' | 'customers' | 'finance' | 'reports' | 'settings' | 'dashboard';
 }> = [
-  { key: 'dashboard', label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-  { key: 'dispatch', label: 'Dispatch', href: '/admin/dispatch', icon: Route },
-  { key: 'bookings', label: 'Bookings', href: '/admin/bookings', icon: CalendarCheck },
-  { key: 'drivers', label: 'Drivers', href: '/admin/drivers', icon: Users },
-  { key: 'fleet', label: 'Fleet', href: '/admin/fleet', icon: Car },
-  { key: 'outstation-pricing', label: 'Pricing', href: '/admin/outstation-pricing', icon: Route },
-  { key: 'customers', label: 'Customers', href: '/admin/customers', icon: UserRound },
-  { key: 'finance', label: 'Finance', href: '/admin/finance', icon: Wallet },
-  { key: 'reports', label: 'Reports', href: '/admin/reports', icon: BarChart3 },
-  { key: 'settings', label: 'Settings', href: '/admin/settings', icon: Settings },
+  { key: 'dashboard', label: 'Dashboard', href: '/admin', icon: LayoutDashboard, requiredPerm: 'dashboard' },
+  { key: 'dispatch', label: 'Dispatch', href: '/admin/dispatch', icon: Route, requiredPerm: 'dispatch' },
+  { key: 'bookings', label: 'Bookings', href: '/admin/bookings', icon: CalendarCheck, requiredPerm: 'bookings' },
+  { key: 'drivers', label: 'Drivers', href: '/admin/drivers', icon: Users, requiredPerm: 'drivers' },
+  { key: 'fleet', label: 'Fleet', href: '/admin/fleet', icon: Car, requiredPerm: 'fleet' },
+  { key: 'outstation-pricing', label: 'Pricing', href: '/admin/outstation-pricing', icon: Route, requiredPerm: 'outstation-pricing' },
+  { key: 'customers', label: 'Customers', href: '/admin/customers', icon: UserRound, requiredPerm: 'customers' },
+  { key: 'finance', label: 'Finance', href: '/admin/finance', icon: Wallet, requiredPerm: 'finance' },
+  { key: 'reports', label: 'Reports', href: '/admin/reports', icon: BarChart3, requiredPerm: 'reports' },
+  { key: 'settings', label: 'Settings', href: '/admin/settings', icon: Settings, requiredPerm: 'settings' },
 ];
 
 const SIDEBAR_STORAGE_KEY = 'urbanmiles-admin-sidebar-expanded';
@@ -77,7 +80,7 @@ function getServerSidebarSnapshot() {
   return 'true';
 }
 
-export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
+export function DashboardHeader({ currentPage, adminRole = 'VIEWER' }: DashboardHeaderProps) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const sidebarSnapshot = useSyncExternalStore(subscribeToSidebarState, getSidebarSnapshot, getServerSidebarSnapshot);
@@ -85,6 +88,8 @@ export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
   const [isHoverOpen, setIsHoverOpen] = useState(false);
   const isExpanded = isPinnedOpen || isHoverOpen;
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  const visibleItems = navItems.filter((item) => canAccessPage(adminRole, item.requiredPerm as keyof typeof PAGE_PERMISSIONS));
 
   function toggleExpanded() {
     const nextPinnedState = !isPinnedOpen;
@@ -112,7 +117,7 @@ export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
   }
 
   async function handleLogout() {
-    await fetch('/api/admin/logout', { method: 'POST' });
+    await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'include' });
     router.push('/admin/login');
   }
 
@@ -197,7 +202,7 @@ export function DashboardHeader({ currentPage }: DashboardHeaderProps) {
         </div>
 
         <nav className="dashboard-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3 py-3" aria-label="Admin navigation">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.key;
 

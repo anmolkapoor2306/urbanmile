@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
 import { driverRecordSelect, serializeDriver, type DriverRecord } from '@/lib/driverRecord';
 import { bookingRecordSelect, serializeBooking, type BookingRecord } from '@/lib/bookingRecord';
@@ -15,13 +16,16 @@ export default async function DriversPage() {
     redirect('/admin/login');
   }
 
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'drivers')) redirect('/admin/forbidden');
+
   try {
     await backfillDriverCodes(prisma);
   } catch (error) {
     console.error('Failed to backfill driver codes:', error);
 
     return (
-      <AdminPageFrame currentPage="drivers">
+      <AdminPageFrame currentPage="drivers" adminRole={session?.role}>
         <AdminEmptyState
           title="Driver data is temporarily unavailable"
           description="Driver data is temporarily unavailable. Please check database connection."
@@ -42,7 +46,7 @@ export default async function DriversPage() {
     console.error('Failed to load drivers:', error);
 
     return (
-      <AdminPageFrame currentPage="drivers">
+      <AdminPageFrame currentPage="drivers" adminRole={session?.role}>
         <AdminEmptyState
           title="Driver data is temporarily unavailable"
           description="Driver data is temporarily unavailable. Please check database connection."
@@ -66,7 +70,7 @@ export default async function DriversPage() {
   const serializedBookings = bookings.map(serializeBooking);
 
   return (
-    <AdminPageFrame currentPage="drivers">
+    <AdminPageFrame currentPage="drivers" adminRole={session?.role}>
       <div className="flex h-full w-full flex-1 min-h-0 min-w-0 flex-col overflow-hidden">
           <AdminStatsGrid className="xl:grid-cols-4">
             {[

@@ -3,6 +3,7 @@ import { CarType, DriverAvailability, DriverType, Prisma } from '@prisma/client'
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
+import { hasPermission } from '@/lib/authPermissions';
 import { driverRecordSelect, serializeDriver } from '@/lib/driverRecord';
 import { generateDriverCode, backfillDriverCodes } from '@/lib/driverCode';
 
@@ -79,8 +80,9 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'drivers:read')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const drivers = await prisma.driver.findMany({
@@ -96,18 +98,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'drivers:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const body = await request.json();
-    const result = createDriverSchema.safeParse(body);
+    const parsed = createDriverSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map((issue) => issue.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
     let driver = null;
@@ -119,16 +119,16 @@ export async function POST(request: NextRequest) {
         driver = await prisma.driver.create({
           data: {
             driverCode,
-            name: result.data.name,
-            phone: result.data.phone,
-            email: result.data.email ?? null,
+            name: parsed.data.name,
+            phone: parsed.data.phone,
+            email: parsed.data.email ?? null,
             vehicleType: defaultVehicleType,
-            vehicleNumber: buildDefaultVehicleNumber(result.data.phone),
+            vehicleNumber: buildDefaultVehicleNumber(parsed.data.phone),
             isActive: true,
             driverType: defaultDriverType,
             availabilityStatus: defaultAvailabilityStatus,
-            licenseInfo: result.data.licenseInfo ?? null,
-            notes: result.data.notes ?? null,
+            licenseInfo: parsed.data.licenseInfo ?? null,
+            notes: parsed.data.notes ?? null,
           },
           select: driverRecordSelect,
         });
@@ -153,29 +153,24 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error('Error creating driver:', error);
-    return NextResponse.json(
-      { error: getApiErrorMessage(error, 'Failed to create driver') },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getApiErrorMessage(error, 'Failed to create driver') }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'drivers:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const body = await request.json();
-    const result = updateDriverSchema.safeParse(body);
+    const parsed = updateDriverSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map((issue) => issue.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
-    const driverId = result.data.id;
+    const driverId = parsed.data.id;
     if (!driverId) {
       return NextResponse.json({ error: 'Driver ID is required' }, { status: 400 });
     }
@@ -189,8 +184,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
 
-    const hasChanged = Object.keys(result.data).some(
-      (key) => key !== 'id' && result.data[key as keyof typeof result.data] !== undefined
+    const hasChanged = Object.keys(parsed.data).some(
+      (key) => key !== 'id' && parsed.data[key as keyof typeof parsed.data] !== undefined
     );
 
     if (!hasChanged) {
@@ -199,14 +194,14 @@ export async function PATCH(request: NextRequest) {
 
     const updateData: Record<string, unknown> = {};
 
-    if (result.data.name !== undefined) updateData.name = result.data.name;
-    if (result.data.phone !== undefined) updateData.phone = result.data.phone;
-    if (result.data.email !== undefined) updateData.email = result.data.email ?? null;
-    if (result.data.isActive !== undefined) updateData.isActive = result.data.isActive;
-    if (result.data.availabilityStatus !== undefined) updateData.availabilityStatus = result.data.availabilityStatus;
-    if (result.data.licenseInfo !== undefined) updateData.licenseInfo = result.data.licenseInfo ?? null;
-    if (result.data.vendorId !== undefined) updateData.vendorId = result.data.vendorId || null;
-    if (result.data.notes !== undefined) updateData.notes = result.data.notes ?? null;
+    if (parsed.data.name !== undefined) updateData.name = parsed.data.name;
+    if (parsed.data.phone !== undefined) updateData.phone = parsed.data.phone;
+    if (parsed.data.email !== undefined) updateData.email = parsed.data.email ?? null;
+    if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+    if (parsed.data.availabilityStatus !== undefined) updateData.availabilityStatus = parsed.data.availabilityStatus;
+    if (parsed.data.licenseInfo !== undefined) updateData.licenseInfo = parsed.data.licenseInfo ?? null;
+    if (parsed.data.vendorId !== undefined) updateData.vendorId = parsed.data.vendorId || null;
+    if (parsed.data.notes !== undefined) updateData.notes = parsed.data.notes ?? null;
 
     const updated = await prisma.driver.update({
       where: { id: driverId },
@@ -217,16 +212,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: true, message: 'Driver updated successfully.', data: serializeDriver(updated) });
   } catch (error) {
     console.error('Error updating driver:', error);
-    return NextResponse.json(
-      { error: getApiErrorMessage(error, 'Failed to update driver') },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getApiErrorMessage(error, 'Failed to update driver') }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'drivers:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
@@ -236,10 +229,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    await prisma.driver.delete({
-      where: { id },
-    });
-
+    await prisma.driver.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting driver:', error);
@@ -248,16 +238,13 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function POSTBackfill(request: NextRequest) {
-  const authError = requireAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'drivers:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const result = await backfillDriverCodes(prisma);
-    return NextResponse.json({
-      success: true,
-      message: 'Driver codes backfilled',
-      data: result,
-    });
+    return NextResponse.json({ success: true, message: 'Driver codes backfilled', data: result });
   } catch (error) {
     console.error('Error backfilling codes:', error);
     return NextResponse.json({ error: 'Failed to backfill codes' }, { status: 500 });

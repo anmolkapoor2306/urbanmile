@@ -308,3 +308,61 @@ enum BookingLocationSource {
   MANUAL_PIN
   CURRENT_LOCATION
 }
+
+model AdminUser {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String
+  role          AdminRole @default(VIEWER)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime? @db.Timestamp(6)
+  createdAt     DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+  sessions      AdminSession[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model AdminSession {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  role      AdminRole
+  token     String    @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime  @db.Timestamp(6)
+  createdAt DateTime  @default(now()) @db.Timestamp(6)
+  user      AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId   String    @db.Uuid
+  action        String
+  entityType    String
+  entityId      String?
+  oldValue      String?   @db.Text
+  newValue      String?   @db.Text
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([adminUserId])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+enum AdminRole {
+  OWNER
+  MANAGER
+  DISPATCHER
+  FINANCE
+  VIEWER
+}

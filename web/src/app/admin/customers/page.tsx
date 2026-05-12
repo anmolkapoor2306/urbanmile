@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
 import { AdminPageFrame, AdminPanel } from '@/components/admin/AdminLayout';
 
@@ -9,6 +10,9 @@ export default async function CustomersPage() {
   if (!(await isCurrentAdminAuthenticated())) {
     redirect('/admin/login');
   }
+
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'customers')) redirect('/admin/forbidden');
 
   const customers = await prisma.customer.findMany({
     include: {
@@ -25,7 +29,7 @@ export default async function CustomersPage() {
   });
 
   return (
-    <AdminPageFrame currentPage="customers">
+    <AdminPageFrame currentPage="customers" adminRole={session?.role}>
       <div className="flex flex-1 flex-col gap-5">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-zinc-950 dark:text-white">Customers</h1>

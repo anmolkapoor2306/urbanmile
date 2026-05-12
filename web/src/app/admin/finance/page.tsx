@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { isCurrentAdminAuthenticated } from '@/lib/adminAuth';
+import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
+import { canAccessPage } from '@/lib/authPermissions';
 import { AdminPageFrame, AdminPanel, adminSecondaryButtonClassName, AdminStatCard, AdminStatsGrid } from '@/components/admin/AdminLayout';
 import { getPaymentStatusLabel } from '@/lib/dispatch';
 import { getBookingDisplayAssignee, sumMoney } from '@/lib/opsDashboard';
@@ -13,11 +14,13 @@ export default async function FinancePage() {
     redirect('/admin/login');
   }
 
+  const session = await getCurrentAdminSession();
+  if (session && !canAccessPage(session.role, 'finance')) redirect('/admin/forbidden');
   const financeBookings = await loadFinanceBookingsSafely();
 
   if (!financeBookings.ok) {
     return (
-      <AdminPageFrame currentPage="finance">
+      <AdminPageFrame currentPage="finance" adminRole={session?.role}>
         <FinanceUnavailable message={financeBookings.message} />
       </AdminPageFrame>
     );
@@ -53,7 +56,7 @@ export default async function FinancePage() {
     .slice(0, 10);
 
   return (
-    <AdminPageFrame currentPage="finance">
+    <AdminPageFrame currentPage="finance" adminRole={session?.role}>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden">
         <div className="shrink-0">
           <h1 className="text-2xl font-black tracking-tight text-zinc-950 dark:text-white">Finance</h1>

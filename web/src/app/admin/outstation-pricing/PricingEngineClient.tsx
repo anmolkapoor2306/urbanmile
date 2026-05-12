@@ -361,8 +361,13 @@ export function PricingEngineClient() {
       window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
       cancelTripOverrideForm();
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('[Trip Override UI] save failed', error);
-      setTripOverrideError('Could not save trip override. Please try again.');
+      if (message === 'unauthorized') {
+        setTripOverrideError('Your admin session expired. Please log in again.');
+      } else {
+        setTripOverrideError('Could not save trip override. Please try again.');
+      }
     }
   }
 
@@ -396,8 +401,13 @@ export function PricingEngineClient() {
       setTripOverrides(savedOverrides);
       window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('[Trip Override UI] update failed', error);
-      setTripOverrideError('Could not update trip override. Please try again.');
+      if (message === 'unauthorized') {
+        setTripOverrideError('Your admin session expired. Please log in again.');
+      } else {
+        setTripOverrideError('Could not update trip override. Please try again.');
+      }
     }
   }
 
@@ -2205,7 +2215,10 @@ function readStoredTripOverrides() {
 }
 
 async function loadTripOverridesFromServer() {
-  const response = await fetch('/api/admin/trip-overrides', { cache: 'no-store' });
+  const response = await fetch('/api/admin/trip-overrides', {
+    cache: 'no-store',
+    credentials: 'include',
+  });
   const data = (await response.json()) as { data?: unknown; error?: string };
 
   if (!response.ok) {
@@ -2227,6 +2240,7 @@ async function saveTripOverridesToServer(overrides: TripOverride[]) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ overrides: payload }),
+    credentials: 'include',
   });
   const data = (await response.json()) as { data?: unknown; error?: string };
   console.info('[Trip Override UI] PUT /api/admin/trip-overrides response', {
@@ -2235,6 +2249,10 @@ async function saveTripOverridesToServer(overrides: TripOverride[]) {
     error: data.error,
     data,
   });
+
+  if (response.status === 401) {
+    throw new Error('unauthorized');
+  }
 
   if (!response.ok) {
     throw new Error(data.error ?? 'Could not save trip overrides');

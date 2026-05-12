@@ -2108,14 +2108,6 @@ function RideSelectionView({
     rideOptions.find((option) => option.value === selectedRide && !option.disabled) ??
     rideOptions.find((option) => option.value === ACTIVE_CUSTOMER_RIDE) ??
     rideOptions[0];
-  const overrideDebug = priceQuote.overrideDebug;
-  const overrideDebugLabel =
-    priceQuote.priceSource === 'override'
-      ? `Override matched: ${formatDebugCityName(overrideDebug?.pickupCity ?? priceQuote.pickupCity)} ↔ ${formatDebugCityName(
-          overrideDebug?.dropoffCity ?? priceQuote.dropoffCity
-        )}`
-      : 'No override matched';
-
   return (
     <main className="min-h-[calc(100vh-72px)] overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white lg:h-full lg:min-h-0 lg:overflow-hidden">
       <div className="grid min-h-[calc(100vh-72px)] grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(390px,520px)_minmax(0,1fr)]">
@@ -2174,17 +2166,6 @@ function RideSelectionView({
               </div>
             </div>
 
-            <div
-              className={cn(
-                'rounded-[18px] border px-4 py-3 text-sm font-black',
-                priceQuote.priceSource === 'override'
-                  ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-300/40 dark:bg-amber-400/10 dark:text-amber-200'
-                  : 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'
-              )}
-            >
-              {overrideDebugLabel}
-            </div>
-
             <div className="space-y-3">
               {rideOptions.map((option) => {
                 const isDisabled = Boolean(option.disabled);
@@ -2211,8 +2192,8 @@ function RideSelectionView({
                     )}
                   >
                     {isDisabled && (
-                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 px-4 text-center backdrop-blur-[1px] dark:bg-zinc-950/70">
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-5 py-2 text-sm font-black uppercase tracking-[0.18em] text-amber-800 shadow-sm dark:border-amber-300/40 dark:bg-amber-400/15 dark:text-amber-200">
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/80 px-4 text-center">
+                        <span className="rounded-full border border-amber-500/30 bg-zinc-950 px-5 py-2 text-sm font-bold tracking-wide text-amber-400">
                           Coming Soon
                         </span>
                       </div>
@@ -2624,27 +2605,28 @@ function RideMapPreview({
   return (
     <div className="relative h-full min-h-[360px] overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" />
-      <div className="pointer-events-none absolute inset-x-4 bottom-4 rounded-[24px] border border-zinc-200 bg-white p-4 shadow-xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/25">
-        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-          <RouteInfoItem label="Pickup" value={pickupDisplayTime} />
-          <RouteInfoItem
-            label="Distance"
-            value={routePreview.isLoading ? 'Loading...' : formatDistance(routePreview.distanceKm)}
-          />
-          <RouteInfoItem
-            label="Trip time"
-            value={routePreview.isLoading ? 'Loading...' : formatTripDuration(routePreview.durationMinutes)}
-          />
-          <RouteInfoItem label="Fare" value={formatMoney(finalPrice)} />
+      <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 overflow-hidden rounded-[18px] border border-zinc-200 bg-white shadow-lg shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 max-w-[100%] sm:max-w-[720px]">
+        <div className="grid grid-cols-3 items-center gap-8 px-7 py-4">
+          <div className="text-center">
+            <RouteInfoItem label="Pickup" value={pickupDisplayTime} />
+          </div>
+          <div className="text-center">
+            <RouteInfoItem
+              label="Distance"
+              value={routePreview.isLoading ? 'Loading...' : formatDistance(routePreview.distanceKm)}
+            />
+          </div>
+          <div className="text-center">
+            <RouteInfoItem label="Fare" value={formatMoney(finalPrice)} />
+          </div>
         </div>
         {routePreview.error && (
-          <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
-            {routePreview.error}
-          </p>
+          <div className="border-t border-zinc-200 px-7 py-2 dark:border-zinc-800">
+            <p className="text-center text-xs font-semibold text-amber-700 dark:text-amber-300">
+              {routePreview.error}
+            </p>
+          </div>
         )}
-        <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          Fares are estimates and may vary.
-        </p>
       </div>
     </div>
   );
@@ -3269,18 +3251,6 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
-function formatDebugCityName(value: string | null | undefined) {
-  const cleanedValue = (value ?? '').replace(/\s+/g, ' ').trim();
-
-  if (!cleanedValue) {
-    return 'Unknown';
-  }
-
-  return cleanedValue
-    .split(' ')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
 
 function getRideFare(priceQuote: FixedRoutePrice, ride: RideOption) {
   if (ride !== ACTIVE_CUSTOMER_RIDE) {
@@ -3325,21 +3295,6 @@ function formatDistance(distanceKm: number | null) {
   }
 
   return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
-}
-
-function formatTripDuration(durationMinutes: number | null) {
-  if (durationMinutes === null) {
-    return 'Pending';
-  }
-
-  if (durationMinutes < 60) {
-    return `${durationMinutes} min`;
-  }
-
-  const hours = Math.floor(durationMinutes / 60);
-  const minutes = durationMinutes % 60;
-
-  return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
 }
 
 function formatPickupDateTime(value: string) {

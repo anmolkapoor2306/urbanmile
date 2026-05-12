@@ -9,13 +9,15 @@ export function DispatchPageWrapper({
   drivers,
   bookings,
   loadError,
+  adminRole,
 }: {
   drivers: SerializedDriver[];
   bookings: SerializedBooking[];
   loadError: string | null;
+  adminRole?: string;
 }) {
   return (
-    <AdminPageFrame currentPage="dispatch">
+    <AdminPageFrame currentPage="dispatch" adminRole={adminRole}>
         <div className="flex w-full min-w-0 flex-1 min-h-0 flex-col overflow-hidden">
           {loadError ? (
             <AdminPanel className="mb-6 shrink-0 border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 shadow-none">

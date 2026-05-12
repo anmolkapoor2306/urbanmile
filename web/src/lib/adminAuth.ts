@@ -1,37 +1,37 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-
-export const ADMIN_COOKIE_NAME = 'admin_session';
-export const ADMIN_COOKIE_VALUE = 'authenticated';
-export const ADMIN_COOKIE_MAX_AGE = 3600;
+import {
+  SESSION_COOKIE_NAME,
+  verifySessionToken,
+  type AdminSessionPayload,
+} from '@/lib/sessionToken';
 
 type AdminCookieReader = {
   get(name: string): { value: string } | undefined;
 };
 
-const adminCookieOptions = {
+const clearedCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax' as const,
   path: '/',
+  expires: new Date(0),
+  maxAge: 0,
 };
 
-function getClearedAdminCookieOptions() {
-  return {
-    ...adminCookieOptions,
-    expires: new Date(0),
-    maxAge: 0,
-  };
+export async function parseAdminSession(cookieStore: AdminCookieReader): Promise<AdminSessionPayload | null> {
+  const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME);
+  if (!sessionCookie) return null;
+  return verifySessionToken(sessionCookie.value);
 }
 
-export function isAdminAuthenticated(cookieStore: AdminCookieReader): boolean {
-  const adminSession = cookieStore.get(ADMIN_COOKIE_NAME);
-  return adminSession?.value === ADMIN_COOKIE_VALUE;
+export async function getCurrentAdminSession(): Promise<AdminSessionPayload | null> {
+  const cookieStore = await cookies();
+  return parseAdminSession(cookieStore);
 }
 
 export async function isCurrentAdminAuthenticated(): Promise<boolean> {
-  const cookieStore = await cookies();
-  return isAdminAuthenticated(cookieStore);
+  return (await getCurrentAdminSession()) !== null;
 }
 
 export async function getCurrentAdminCookieHeader(): Promise<string> {
@@ -41,44 +41,51 @@ export async function getCurrentAdminCookieHeader(): Promise<string> {
 
 export async function clearCurrentAdminSession(): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.set(ADMIN_COOKIE_NAME, '', getClearedAdminCookieOptions());
+  cookieStore.set(SESSION_COOKIE_NAME, '', clearedCookieOptions);
 }
 
-export function requireAdminAuth(request: NextRequest): NextResponse | null {
-  if (!isAdminAuthenticated(request.cookies)) {
+export async function isAdminAuthenticated(cookieStore: AdminCookieReader): Promise<AdminSessionPayload | null> {
+  return parseAdminSession(cookieStore);
+}
+
+export async function requireAdminAuth(request: NextRequest): Promise<{ session: AdminSessionPayload } | NextResponse> {
+  const session = await isAdminAuthenticated(request.cookies);
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return { session };
+}
+
+export async function requireCurrentAdminAuth(request?: NextRequest): Promise<{ session: AdminSessionPayload } | NextResponse> {
+  if (request) {
+    const session = await isAdminAuthenticated(request.cookies);
+    if (session) return { session };
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  return null;
-}
-
-export async function requireCurrentAdminAuth(request?: NextRequest): Promise<NextResponse | null> {
-  if (request && isAdminAuthenticated(request.cookies)) {
-    return null;
-  }
-
-  if (await isCurrentAdminAuthenticated()) {
-    return null;
-  }
-
+  const session = await getCurrentAdminSession();
+  if (session) return { session };
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
-export function checkAdminAuth(request: NextRequest): boolean {
+export async function checkAdminAuth(request: NextRequest): Promise<AdminSessionPayload | null> {
   return isAdminAuthenticated(request.cookies);
 }
 
-export function setAdminSession(response: NextResponse): void {
-  response.cookies.set(ADMIN_COOKIE_NAME, ADMIN_COOKIE_VALUE, {
-    ...adminCookieOptions,
-    maxAge: ADMIN_COOKIE_MAX_AGE,
+export function setAdminSessionCookie(response: NextResponse, token: string): void {
+  response.cookies.set(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 8 * 3600,
   });
 }
 
-export function clearAdminSession(response: NextResponse): void {
-  response.cookies.set(ADMIN_COOKIE_NAME, '', getClearedAdminCookieOptions());
+export function clearAdminSessionCookie(response: NextResponse): void {
+  response.cookies.set(SESSION_COOKIE_NAME, '', clearedCookieOptions);
 }
 
-export function validateAdminSession(request: NextRequest): boolean {
+export async function validateAdminSession(request: NextRequest): Promise<AdminSessionPayload | null> {
   return isAdminAuthenticated(request.cookies);
 }

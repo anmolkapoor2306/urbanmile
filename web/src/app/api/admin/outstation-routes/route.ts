@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { requireCurrentAdminAuth } from '@/lib/adminAuth';
+import { hasPermission } from '@/lib/authPermissions';
 import {
   calculateSuggestedFare,
   formatPricingCityTitle,
@@ -18,19 +19,14 @@ const numericInputSchema = z.preprocess((value) => {
     const trimmedValue = value.trim();
     return trimmedValue ? Number(trimmedValue) : undefined;
   }
-
   return value;
 }, z.number().finite());
 const nullableNumericInputSchema = z.preprocess((value) => {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-
+  if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'string') {
     const trimmedValue = value.trim();
     return trimmedValue ? Number(trimmedValue) : null;
   }
-
   return value;
 }, z.number().finite().positive().nullable());
 
@@ -60,7 +56,6 @@ function uniqueAliases(city: string, aliases: string[] | undefined) {
 function cleanRouteLocation(cityValue: string, stateValue?: string | null) {
   const parsedLocation = splitCityStateDisplay(cityValue);
   const state = normalizeIndianStateName(stateValue || parsedLocation.state);
-
   return {
     city: formatPricingCityTitle(parsedLocation.city),
     state: state || null,
@@ -72,18 +67,17 @@ function getRouteMutationErrorMessage(error: unknown, action: 'create' | 'update
     if (error.code === 'P2002') {
       return 'A route with this origin and destination already exists. Edit the existing route instead.';
     }
-
     if (error.code === 'P2022') {
       return 'The route pricing database is missing the latest city/state columns. Apply the latest database migration and try again.';
     }
   }
-
   return `Could not ${action} outstation route. Check the server logs for details.`;
 }
 
 export async function GET(request: NextRequest) {
-  const authError = await requireCurrentAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireCurrentAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'outstation:read')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const routes = await prisma.outstationRoute.findMany({
     orderBy: [{ isActive: 'desc' }, { originCity: 'asc' }, { destinationCity: 'asc' }],
@@ -93,23 +87,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = await requireCurrentAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireCurrentAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'outstation:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const body = await request.json();
-    const result = createRouteSchema.safeParse(body);
+    const parsed = createRouteSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map((issue) => issue.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
-    const origin = cleanRouteLocation(result.data.originCity, result.data.originState);
-    const destination = cleanRouteLocation(result.data.destinationCity, result.data.destinationState);
-    const suggestedFare = calculateSuggestedFare(result.data.estimatedKm ?? null);
+    const origin = cleanRouteLocation(parsed.data.originCity, parsed.data.originState);
+    const destination = cleanRouteLocation(parsed.data.destinationCity, parsed.data.destinationState);
+    const suggestedFare = calculateSuggestedFare(parsed.data.estimatedKm ?? null);
 
     const route = await prisma.outstationRoute.create({
       data: {
@@ -117,15 +109,15 @@ export async function POST(request: NextRequest) {
         originState: origin.state,
         destinationCity: destination.city,
         destinationState: destination.state,
-        originAliases: uniqueAliases(origin.city, result.data.originAliases),
-        destinationAliases: uniqueAliases(destination.city, result.data.destinationAliases),
-        sedanFare: result.data.sedanFare,
-        suvMarkup: result.data.suvMarkup,
-        estimatedKm: result.data.estimatedKm ?? null,
+        originAliases: uniqueAliases(origin.city, parsed.data.originAliases),
+        destinationAliases: uniqueAliases(destination.city, parsed.data.destinationAliases),
+        sedanFare: parsed.data.sedanFare,
+        suvMarkup: parsed.data.suvMarkup,
+        estimatedKm: parsed.data.estimatedKm ?? null,
         suggestedFare,
-        isActive: result.data.isActive,
-        isBidirectional: result.data.isBidirectional,
-        notes: result.data.notes || null,
+        isActive: parsed.data.isActive,
+        isBidirectional: parsed.data.isBidirectional,
+        notes: parsed.data.notes || null,
       },
     });
 
@@ -137,65 +129,52 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = await requireCurrentAdminAuth(request);
-  if (authError) return authError;
+  const auth = await requireCurrentAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'outstation:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const body = await request.json();
-    const result = updateRouteSchema.safeParse(body);
+    const parsed = updateRouteSchema.safeParse(body);
 
-    if (!result.success) {
-      return NextResponse.json(
-        { error: result.error.issues.map((issue) => issue.message).join(', ') },
-        { status: 400 }
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
-    const existingRoute = await prisma.outstationRoute.findUnique({ where: { id: result.data.id } });
+    const existingRoute = await prisma.outstationRoute.findUnique({ where: { id: parsed.data.id } });
     if (!existingRoute) {
       return NextResponse.json({ error: 'Route not found' }, { status: 404 });
     }
 
-    const origin = result.data.originCity || result.data.originState !== undefined
-      ? cleanRouteLocation(result.data.originCity ?? existingRoute.originCity, result.data.originState ?? existingRoute.originState)
-      : {
-          city: formatPricingCityTitle(existingRoute.originCity),
-          state: existingRoute.originState,
-        };
-    const destination = result.data.destinationCity || result.data.destinationState !== undefined
-      ? cleanRouteLocation(
-          result.data.destinationCity ?? existingRoute.destinationCity,
-          result.data.destinationState ?? existingRoute.destinationState
-        )
-      : {
-          city: formatPricingCityTitle(existingRoute.destinationCity),
-          state: existingRoute.destinationState,
-        };
-    const estimatedKm = result.data.estimatedKm === undefined
-      ? existingRoute.estimatedKm
-      : result.data.estimatedKm;
+    const origin = parsed.data.originCity || parsed.data.originState !== undefined
+      ? cleanRouteLocation(parsed.data.originCity ?? existingRoute.originCity, parsed.data.originState ?? existingRoute.originState)
+      : { city: formatPricingCityTitle(existingRoute.originCity), state: existingRoute.originState };
+    const destination = parsed.data.destinationCity || parsed.data.destinationState !== undefined
+      ? cleanRouteLocation(parsed.data.destinationCity ?? existingRoute.destinationCity, parsed.data.destinationState ?? existingRoute.destinationState)
+      : { city: formatPricingCityTitle(existingRoute.destinationCity), state: existingRoute.destinationState };
+    const estimatedKm = parsed.data.estimatedKm === undefined ? existingRoute.estimatedKm : parsed.data.estimatedKm;
     const estimatedKmNumber = estimatedKm === null ? null : Number(estimatedKm);
 
     const route = await prisma.outstationRoute.update({
-      where: { id: result.data.id },
+      where: { id: parsed.data.id },
       data: {
         originCity: origin.city,
         originState: origin.state,
         destinationCity: destination.city,
         destinationState: destination.state,
-        originAliases: result.data.originAliases === undefined && result.data.originCity === undefined
+        originAliases: parsed.data.originAliases === undefined && parsed.data.originCity === undefined
           ? existingRoute.originAliases
-          : uniqueAliases(origin.city, result.data.originAliases),
-        destinationAliases: result.data.destinationAliases === undefined && result.data.destinationCity === undefined
+          : uniqueAliases(origin.city, parsed.data.originAliases),
+        destinationAliases: parsed.data.destinationAliases === undefined && parsed.data.destinationCity === undefined
           ? existingRoute.destinationAliases
-          : uniqueAliases(destination.city, result.data.destinationAliases),
-        sedanFare: result.data.sedanFare ?? existingRoute.sedanFare,
-        suvMarkup: result.data.suvMarkup ?? existingRoute.suvMarkup,
+          : uniqueAliases(destination.city, parsed.data.destinationAliases),
+        sedanFare: parsed.data.sedanFare ?? existingRoute.sedanFare,
+        suvMarkup: parsed.data.suvMarkup ?? existingRoute.suvMarkup,
         estimatedKm,
         suggestedFare: calculateSuggestedFare(estimatedKmNumber),
-        isActive: result.data.isActive ?? existingRoute.isActive,
-        isBidirectional: result.data.isBidirectional ?? existingRoute.isBidirectional,
-        notes: result.data.notes === undefined ? existingRoute.notes : result.data.notes || null,
+        isActive: parsed.data.isActive ?? existingRoute.isActive,
+        isBidirectional: parsed.data.isBidirectional ?? existingRoute.isBidirectional,
+        notes: parsed.data.notes === undefined ? existingRoute.notes : parsed.data.notes || null,
       },
     });
 
