@@ -140,11 +140,10 @@ async function main() {
   const bookingCount = 50;
 
   const statusDistribution: Record<BookingStatus, number> = {
-    NEW: 0,
-    CONFIRMED: 12,
+    NEEDS_ASSIGNMENT: 12,
     ASSIGNED: 10,
     ACTIVE: 8,
-    COMPLETED: 15,
+    COMPLETE: 15,
     CANCELLED: 5,
   };
 
@@ -178,10 +177,10 @@ async function main() {
     } else if (status === 'ASSIGNED') {
       // Assigned: 2h-24h from now
       pickupDateTime = new Date(now.getTime() + randInt(2, 24) * 3600000);
-    } else if (status === 'CONFIRMED') {
-      // Confirmed: 1d-14d from now
+    } else if (status === 'NEEDS_ASSIGNMENT') {
+      // Needs assignment: 1d-14d from now
       pickupDateTime = new Date(now.getTime() + randInt(1, 14) * 86400000 + randInt(6, 20) * 3600000);
-    } else if (status === 'COMPLETED') {
+    } else if (status === 'COMPLETE') {
       // Completed: spread across last 7 days, some today
       if (i % 3 === 0) {
         // Today
@@ -207,7 +206,7 @@ async function main() {
 
     // Payment status: completed trips likely paid
     let paymentStatus: any;
-    if (status === 'COMPLETED') {
+    if (status === 'COMPLETE') {
       paymentStatus = randInt(0, 2) === 0 ? 'PAID' : 'UNPAID';
     } else if (status === 'CANCELLED') {
       paymentStatus = 'REFUNDED';
@@ -239,21 +238,21 @@ async function main() {
       status,
       paymentStatus,
       assignmentType: assignedDriver?.driverType === 'VENDOR' ? 'OUTSOURCED_DRIVER' : assignedDriver ? 'OWN_DRIVER' : null,
-      createdAt: status === 'COMPLETED' || status === 'CANCELLED'
+      createdAt: status === 'COMPLETE' || status === 'CANCELLED'
         ? new Date(pickupDateTime.getTime() - randInt(1, 48) * 3600000)
         : new Date(now.getTime() - randInt(0, 72) * 3600000),
       bookingReference: `UM-${pickupDateTime.getFullYear()}0${randInt(1, 9)}${randInt(1, 9)}-${crypto.randomUUID().slice(0, 8)}`,
       fareAmount: fare,
-      commissionAmount: status === 'COMPLETED' ? Math.round(fare * randFloat(0.08, 0.15)) : null,
+      commissionAmount: status === 'COMPLETE' ? Math.round(fare * randFloat(0.08, 0.15)) : null,
       driverEarning: assignedDriver ? Math.round(fare * randFloat(0.4, 0.7)) : null,
       payoutAmount: assignedDriver ? Math.round(fare * randFloat(0.3, 0.6)) : null,
       netEarningAmount: fare - (assignedDriver ? Math.round(fare * randFloat(0.3, 0.6)) : 0),
       driverId: assignedDriver?.id || null,
       vehicleId: vehicle?.id || null,
       assignedAt: assignedDriver ? new Date(pickupDateTime.getTime() - randInt(10, 120) * 60000) : null,
-      confirmedAt: status !== 'NEW' ? new Date(pickupDateTime.getTime() - randInt(10, 60) * 60000) : null,
+      confirmedAt: new Date(pickupDateTime.getTime() - randInt(10, 60) * 60000),
       startedAt: status === 'ACTIVE' ? new Date(pickupDateTime.getTime() + randInt(0, 15) * 60000) : null,
-      completedAt: status === 'COMPLETED' ? new Date(pickupDateTime.getTime() + randInt(30, 480) * 60000) : null,
+      completedAt: status === 'COMPLETE' ? new Date(pickupDateTime.getTime() + randInt(30, 480) * 60000) : null,
       cancelledAt: status === 'CANCELLED' ? new Date(pickupDateTime.getTime() + randInt(5, 120) * 60000) : null,
       cancelReason: status === 'CANCELLED' ? rand(['Customer cancelled', 'Driver unavailable', 'Weather conditions', 'Payment issue', null]) : null,
     };
@@ -277,7 +276,7 @@ async function main() {
 
   const totalRevenue = await prisma.booking.aggregate({
     _sum: { fareAmount: true },
-    where: { status: 'COMPLETED' },
+    where: { status: 'COMPLETE' },
   });
   console.log(`\nTotal completed revenue: ₹${totalRevenue._sum.fareAmount?.toNumber() || 0}`);
 }

@@ -23,7 +23,6 @@ import { bookingLocationMetadataSchema } from '@/lib/bookingLocation';
 import { useBookingLocationField } from '@/hooks/useBookingLocationField';
 import {
   getFixedCitySuggestions,
-  getFixedRoutePrice,
   getOutstationVehicleFare,
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
@@ -43,6 +42,10 @@ import {
   formatCityStateDisplay,
   getKnownIndianCityState,
 } from '@/lib/locationFormatting';
+import {
+  PICKUP_MANUAL_CONFIRMATION_MESSAGE,
+  PICKUP_UNSERVICEABLE_MESSAGE,
+} from '@/lib/operationalZoneRules';
 
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
@@ -166,6 +169,9 @@ type RideOptionsDraft = {
 };
 type PublicOutstationQuoteResponse = {
   success?: boolean;
+  error?: string;
+  code?: string;
+  serviceability?: FixedRoutePrice['serviceability'];
   data?: {
     pickupCity: string | null;
     dropoffCity: string | null;
@@ -176,7 +182,12 @@ type PublicOutstationQuoteResponse = {
     priceSource?: FixedRoutePrice['priceSource'];
     tripOverrideId?: string | null;
     overrideDebug?: TripOverrideDebugInfo;
+    serviceability?: FixedRoutePrice['serviceability'];
   };
+};
+type RoutePriceQuoteResult = {
+  priceQuote: FixedRoutePrice | null;
+  message?: string;
 };
 type ManualPinSelection = {
   label: string;
@@ -192,15 +203,23 @@ type CustomerProfile = {
   supabaseUserId: string;
 };
 
+type LoggedInBookingCustomer = {
+  fullName: string;
+  phone: string | null;
+  email: string | null;
+};
+
 interface BookingFormProps {
   onBookingSuccess?: () => void;
   onReset?: () => void;
   mode?: 'search' | 'ride-options';
+  initialCustomer?: LoggedInBookingCustomer | null;
 }
 
-export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: BookingFormProps) {
+export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initialCustomer = null }: BookingFormProps) {
   const router = useRouter();
   const isRideOptionsPage = mode === 'ride-options';
+  const isLoggedInCustomer = Boolean(initialCustomer?.phone);
   const [isSuccess, setIsSuccess] = useState(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   const pickupTimingMenuRef = useRef<HTMLDivElement>(null);
@@ -218,6 +237,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   const [priceQuote, setPriceQuote] = useState<FixedRoutePrice | null>(null);
   const [selectedRide, setSelectedRide] = useState<RideOption>('SEDAN');
   const [routeMessage, setRouteMessage] = useState<string | null>(null);
+  const [isRestoringRideOptions, setIsRestoringRideOptions] = useState(false);
   const [activeLocationField, setActiveLocationField] = useState<LocationFieldName | null>(null);
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0);
   const [addressSuggestions, setAddressSuggestions] = useState<Record<LocationFieldName, AddressSuggestion[]>>({
@@ -281,7 +301,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   const finalPrice = priceQuote ? getRideFare(priceQuote, selectedRide) : 0;
   const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
   const returnDateTime = buildPickupDateTime(returnDate, returnTime);
-  const isRouteUnavailable = routeMessage === UNAVAILABLE_ROUTE_MESSAGE;
+  const isRouteUnavailable = routeMessage === UNAVAILABLE_ROUTE_MESSAGE || routeMessage === PICKUP_UNSERVICEABLE_MESSAGE;
   const activeLocationValue =
     activeLocationField === 'pickupLocation'
       ? pickupField.address
@@ -371,9 +391,33 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       setReturnDate(parsed.returnDate ?? '');
       setReturnTime(parsed.returnTime ?? '');
       setSelectedRide(ACTIVE_CUSTOMER_RIDE);
-      setPriceQuote(parsed.priceQuote);
+      setPriceQuote(null);
+      setRouteMessage(null);
+      setIsRestoringRideOptions(true);
+      void getBookingRoutePriceQuote(restoredFormData)
+        .then((routeQuoteResult) => {
+          if (routeQuoteResult.priceQuote) {
+            setPriceQuote(routeQuoteResult.priceQuote);
+            setRouteMessage(null);
+            window.sessionStorage.setItem(
+              RIDE_OPTIONS_DRAFT_KEY,
+              JSON.stringify({
+                ...parsed,
+                formData: restoredFormData,
+                selectedRide: ACTIVE_CUSTOMER_RIDE,
+                priceQuote: routeQuoteResult.priceQuote,
+              })
+            );
+          } else {
+            setPriceQuote(null);
+            setRouteMessage(routeQuoteResult.message ?? PICKUP_UNSERVICEABLE_MESSAGE);
+            window.sessionStorage.removeItem(RIDE_OPTIONS_DRAFT_KEY);
+          }
+        })
+        .finally(() => setIsRestoringRideOptions(false));
     } catch {
       window.sessionStorage.removeItem(RIDE_OPTIONS_DRAFT_KEY);
+      setIsRestoringRideOptions(false);
     }
     // The location field helpers are stable for the lifetime of this mounted booking flow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1045,11 +1089,12 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = await getBookingRoutePriceQuote(formData);
+    const routeQuoteResult = await getBookingRoutePriceQuote(formData);
+    const fixedRoutePrice = routeQuoteResult.priceQuote;
 
     if (!fixedRoutePrice) {
       setPriceQuote(null);
-      setRouteMessage(UNAVAILABLE_ROUTE_MESSAGE);
+      setRouteMessage(routeQuoteResult.message ?? UNAVAILABLE_ROUTE_MESSAGE);
       return;
     }
 
@@ -1102,11 +1147,12 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    const fixedRoutePrice = await getBookingRoutePriceQuote(formData);
+    const routeQuoteResult = await getBookingRoutePriceQuote(formData);
+    const fixedRoutePrice = routeQuoteResult.priceQuote;
 
     if (!fixedRoutePrice) {
       setShowDateTimeModal(false);
-      setRouteMessage(UNAVAILABLE_ROUTE_MESSAGE);
+      setRouteMessage(routeQuoteResult.message ?? UNAVAILABLE_ROUTE_MESSAGE);
       return;
     }
 
@@ -1134,6 +1180,48 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
   };
 
   const handleBookNow = async () => {
+    if (isRestoringRideOptions) {
+      return (
+        <div className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-2xl items-center px-4 py-10">
+          <div className="w-full rounded-[28px] border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <Loader2 className="mx-auto h-7 w-7 animate-spin text-amber-500" aria-hidden="true" />
+            <h1 className="mt-4 text-2xl font-black text-zinc-950 dark:text-white">Checking service area</h1>
+            <p className="mt-3 text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
+              Confirming pickup availability before showing ride options.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!priceQuote && routeMessage === PICKUP_UNSERVICEABLE_MESSAGE) {
+      return (
+        <div className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-2xl items-center px-4 py-10">
+          <div className="w-full rounded-[28px] border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <h1 className="text-2xl font-black text-zinc-950 dark:text-white">Choose a ride</h1>
+            <p className="mt-3 text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
+              {PICKUP_UNSERVICEABLE_MESSAGE}
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <a
+                href={CONTACT_PHONE_HREF}
+                className="inline-flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+              >
+                Call Now
+              </a>
+              <button
+                type="button"
+                onClick={() => router.push('/#ride')}
+                className="inline-flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-6 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+              >
+                Back to Ride
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (!priceQuote) {
       return;
     }
@@ -1155,13 +1243,25 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       return;
     }
 
-    if (authStep !== 'otp' || !customerProfile.fullName.trim()) {
+    const bookingCustomer = isLoggedInCustomer
+      ? {
+          fullName: initialCustomer?.fullName || '',
+          email: initialCustomer?.email || '',
+          phone: initialCustomer?.phone || '',
+        }
+      : {
+          fullName: customerProfile.fullName,
+          email: customerProfile.email,
+          phone: verifiedPhone,
+        };
+
+    if (!isLoggedInCustomer && (authStep !== 'otp' || !customerProfile.fullName.trim())) {
       setBookingError('Verify your phone before booking.');
       setIsSubmitting(false);
       return;
     }
 
-    if (!phoneVerified) {
+    if (!isLoggedInCustomer && !phoneVerified) {
       if (!otpSent) {
         setBookingError('Please verify phone number');
         setIsSubmitting(false);
@@ -1176,10 +1276,12 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
     }
 
     if (
+      !isLoggedInCustomer && (
       !phoneVerified ||
       !phoneVerificationToken ||
       !verifiedPhone ||
       !customerProfile.fullName
+      )
     ) {
       setBookingError('Verify your phone before booking.');
       setIsSubmitting(false);
@@ -1205,9 +1307,9 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
 
     const result = bookingSchema.safeParse({
       ...formData,
-      fullName: customerProfile.fullName,
-      email: customerProfile.email,
-      phone: verifiedPhone,
+      fullName: bookingCustomer.fullName,
+      email: bookingCustomer.email,
+      phone: bookingCustomer.phone,
       pickupDateTime,
       carType: selectedRide,
       fareAmount: finalPrice,
@@ -1230,15 +1332,16 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
       const response = await fetch('/api/bookings/public', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           bookingType: result.data.bookingType,
-          fullName: customerProfile.fullName,
-          email: customerProfile.email,
-          phone: verifiedPhone,
-          phoneVerificationToken,
-          authProvider,
-          emailVerified: customerProfile.emailVerified,
-          supabaseUserId: customerProfile.supabaseUserId || undefined,
+          fullName: bookingCustomer.fullName,
+          email: bookingCustomer.email,
+          phone: bookingCustomer.phone,
+          phoneVerificationToken: isLoggedInCustomer ? undefined : phoneVerificationToken,
+          authProvider: isLoggedInCustomer ? undefined : authProvider,
+          emailVerified: isLoggedInCustomer ? undefined : customerProfile.emailVerified,
+          supabaseUserId: isLoggedInCustomer ? undefined : customerProfile.supabaseUserId || undefined,
           pickupLocation: result.data.pickupLocation,
           dropoffLocation: result.data.dropoffLocation,
           pickupDateTime: new Date(result.data.pickupDateTime).toISOString(),
@@ -1349,6 +1452,11 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
                 ))}
               </div>
             )}
+            {!isLoggedInCustomer && bookingReferences.length > 0 && (
+              <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                Please note down your booking ID for future booking tracking and support.
+              </p>
+            )}
             <button
               type="button"
               onClick={() => router.push('/')}
@@ -1392,6 +1500,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         finalPrice={finalPrice}
         formData={formData}
         isAuthBusy={isAuthBusy}
+        isLoggedInCustomer={isLoggedInCustomer}
         isSubmitting={isSubmitting}
         onBack={() => router.push('/#ride')}
         onBookNow={handleBookNow}
@@ -1423,6 +1532,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         returnDateTime={returnDateTime}
         rideOptions={rideOptions}
         selectedRide={selectedRide}
+        serviceability={priceQuote.serviceability}
         totalPrice={totalPrice}
       />
     );
@@ -1447,9 +1557,6 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
           <p className="max-w-md text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
             We have your route details. Our team will confirm availability and pricing shortly.
           </p>
-          <p className="mt-3 max-w-md text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-            Save this booking ID to check your ride status later.
-          </p>
           {bookingReferences.length > 0 && (
             <div className="mt-4 space-y-2">
               {bookingReferences.map((reference) => (
@@ -1461,6 +1568,11 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
                 </p>
               ))}
             </div>
+          )}
+          {!isLoggedInCustomer && bookingReferences.length > 0 && (
+            <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+              Please note down your booking ID for future booking tracking and support.
+            </p>
           )}
           {createdBookingDetails[0]?.customerPublicId && (
             <p className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-bold text-zinc-950 shadow-sm dark:bg-zinc-900 dark:text-zinc-100">
@@ -1524,56 +1636,6 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
           </div>
 
           <div className="space-y-3">
-            <BookingField
-              name={pickupLocationInputName}
-              value={pickupField.address}
-              onChange={handleInputChange}
-              onFocus={() => {
-                setActiveLocationField('pickupLocation');
-                setHighlightedSuggestionIndex(0);
-              }}
-              onBlur={() => window.setTimeout(() => setActiveLocationField(null), 120)}
-              onKeyDown={(event) => handleLocationFieldKeyDown(event, 'pickupLocation')}
-              placeholder="Pickup location"
-              error={errors.pickupLocation || pickupLocationError || undefined}
-              icon="pickup"
-              suggestions={activeLocationField === 'pickupLocation' ? activeLocationSuggestions : []}
-              highlightedSuggestionIndex={highlightedSuggestionIndex}
-              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('pickupLocation', suggestion)}
-              showLocationIcon
-              onLocationIconClick={handleUseCurrentLocation}
-              isLoadingLocation={isLocatingPickup}
-              isLoadingSuggestions={activeLocationField === 'pickupLocation' && isAddressLoading.pickupLocation}
-              onPickOnMap={() => setManualPinField('pickupLocation')}
-              showPickOnMapOption={
-                activeLocationField === 'pickupLocation' &&
-                shouldShowPickOnMapOption(pickupField.address, addressSuggestions.pickupLocation)
-              }
-            />
-            <BookingField
-              name={dropoffLocationInputName}
-              value={dropoffField.address}
-              onChange={handleInputChange}
-              onFocus={() => {
-                setActiveLocationField('dropoffLocation');
-                setHighlightedSuggestionIndex(0);
-              }}
-              onBlur={() => window.setTimeout(() => setActiveLocationField(null), 120)}
-              onKeyDown={(event) => handleLocationFieldKeyDown(event, 'dropoffLocation')}
-              placeholder="Dropoff location"
-              error={errors.dropoffLocation}
-              icon="dropoff"
-              suggestions={activeLocationField === 'dropoffLocation' ? activeLocationSuggestions : []}
-              highlightedSuggestionIndex={highlightedSuggestionIndex}
-              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('dropoffLocation', suggestion)}
-              isLoadingSuggestions={activeLocationField === 'dropoffLocation' && isAddressLoading.dropoffLocation}
-              onPickOnMap={() => setManualPinField('dropoffLocation')}
-              showPickOnMapOption={
-                activeLocationField === 'dropoffLocation' &&
-                shouldShowPickOnMapOption(dropoffField.address, addressSuggestions.dropoffLocation)
-              }
-            />
-
              <div ref={pickupTimingMenuRef} className="relative inline-block">
               <button
                 type="button"
@@ -1628,6 +1690,56 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
                 </div>
               )}
             </div>
+
+            <BookingField
+              name={pickupLocationInputName}
+              value={pickupField.address}
+              onChange={handleInputChange}
+              onFocus={() => {
+                setActiveLocationField('pickupLocation');
+                setHighlightedSuggestionIndex(0);
+              }}
+              onBlur={() => window.setTimeout(() => setActiveLocationField(null), 120)}
+              onKeyDown={(event) => handleLocationFieldKeyDown(event, 'pickupLocation')}
+              placeholder="Pickup location"
+              error={errors.pickupLocation || pickupLocationError || undefined}
+              icon="pickup"
+              suggestions={activeLocationField === 'pickupLocation' ? activeLocationSuggestions : []}
+              highlightedSuggestionIndex={highlightedSuggestionIndex}
+              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('pickupLocation', suggestion)}
+              showLocationIcon
+              onLocationIconClick={handleUseCurrentLocation}
+              isLoadingLocation={isLocatingPickup}
+              isLoadingSuggestions={activeLocationField === 'pickupLocation' && isAddressLoading.pickupLocation}
+              onPickOnMap={() => setManualPinField('pickupLocation')}
+              showPickOnMapOption={
+                activeLocationField === 'pickupLocation' &&
+                shouldShowPickOnMapOption(pickupField.address, addressSuggestions.pickupLocation)
+              }
+            />
+            <BookingField
+              name={dropoffLocationInputName}
+              value={dropoffField.address}
+              onChange={handleInputChange}
+              onFocus={() => {
+                setActiveLocationField('dropoffLocation');
+                setHighlightedSuggestionIndex(0);
+              }}
+              onBlur={() => window.setTimeout(() => setActiveLocationField(null), 120)}
+              onKeyDown={(event) => handleLocationFieldKeyDown(event, 'dropoffLocation')}
+              placeholder="Dropoff location"
+              error={errors.dropoffLocation}
+              icon="dropoff"
+              suggestions={activeLocationField === 'dropoffLocation' ? activeLocationSuggestions : []}
+              highlightedSuggestionIndex={highlightedSuggestionIndex}
+              onSuggestionSelect={(suggestion) => handleLocationSuggestionSelect('dropoffLocation', suggestion)}
+              isLoadingSuggestions={activeLocationField === 'dropoffLocation' && isAddressLoading.dropoffLocation}
+              onPickOnMap={() => setManualPinField('dropoffLocation')}
+              showPickOnMapOption={
+                activeLocationField === 'dropoffLocation' &&
+                shouldShowPickOnMapOption(dropoffField.address, addressSuggestions.dropoffLocation)
+              }
+            />
 
            </div>
 
@@ -1780,6 +1892,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         finalPrice={finalPrice}
         formData={formData}
         isAuthBusy={isAuthBusy}
+        isLoggedInCustomer={isLoggedInCustomer}
         isSubmitting={isSubmitting}
         onBack={() => setPriceQuote(null)}
         onBookNow={handleBookNow}
@@ -1811,6 +1924,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search' }: Book
         returnDateTime={returnDateTime}
         rideOptions={rideOptions}
         selectedRide={selectedRide}
+        serviceability={priceQuote.serviceability}
         totalPrice={totalPrice}
       />
     )}
@@ -2045,6 +2159,7 @@ interface RideSelectionViewProps {
   finalPrice: number;
   formData: BookingFormData;
   isAuthBusy: boolean;
+  isLoggedInCustomer: boolean;
   isSubmitting: boolean;
   onBack: () => void;
   onBookNow: () => void;
@@ -2067,6 +2182,7 @@ interface RideSelectionViewProps {
   returnDateTime: string;
   rideOptions: RideSelectionOption[];
   selectedRide: RideOption;
+  serviceability?: FixedRoutePrice['serviceability'];
   totalPrice: number;
 }
 
@@ -2080,6 +2196,7 @@ function RideSelectionView({
   finalPrice,
   formData,
   isAuthBusy,
+  isLoggedInCustomer,
   isSubmitting,
   onBack,
   onBookNow,
@@ -2102,8 +2219,10 @@ function RideSelectionView({
   returnDateTime,
   rideOptions,
   selectedRide,
+  serviceability,
   totalPrice,
 }: RideSelectionViewProps) {
+  const requiresManualConfirmation = serviceability?.status === 'manual_confirmation';
   const selectedRideOption =
     rideOptions.find((option) => option.value === selectedRide && !option.disabled) ??
     rideOptions.find((option) => option.value === ACTIVE_CUSTOMER_RIDE) ??
@@ -2167,6 +2286,12 @@ function RideSelectionView({
             </div>
 
             <div className="space-y-3">
+              {requiresManualConfirmation && (
+                <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                  {serviceability?.message || PICKUP_MANUAL_CONFIRMATION_MESSAGE}
+                </div>
+              )}
+
               {rideOptions.map((option) => {
                 const isDisabled = Boolean(option.disabled);
                 const isSelected = selectedRide === option.value && !isDisabled;
@@ -2243,92 +2368,94 @@ function RideSelectionView({
               })}
             </div>
 
-            <div className="rounded-[24px] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-              <div className="mb-4 flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-amber-500" aria-hidden="true" />
-                <h4 className="text-base font-bold text-zinc-950 dark:text-white">Verify customer details</h4>
-              </div>
-
-              {authStep === 'choice' && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={onContinueWithGoogle}
-                    disabled={isAuthBusy}
-                    className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-70 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                  >
-                    Continue with Google
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onContinueAsGuest}
-                    className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
-                  >
-                    Continue as Guest with Phone
-                  </button>
+            {!isLoggedInCustomer && (
+              <div className="rounded-[24px] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="mb-4 flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                  <h4 className="text-base font-bold text-zinc-950 dark:text-white">Verify customer details</h4>
                 </div>
-              )}
 
-              {authStep === 'otp' && (
-                <div className="space-y-3">
+                {authStep === 'choice' && (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <BookingField
-                      name="fullName"
-                      value={customerProfile.fullName}
-                      onChange={onProfileChange}
-                      placeholder="Full name"
-                      error={profileErrors.fullName}
-                      required
-                    />
-                    <BookingField
-                      name="email"
-                      type="email"
-                      value={customerProfile.email}
-                      onChange={onProfileChange}
-                      placeholder="Email optional"
-                      error={profileErrors.email}
-                    />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                    <BookingField
-                      name="otpPhone"
-                      value={otpPhone}
-                      onChange={onOtpPhoneChange}
-                      placeholder="Phone number"
-                      required
-                    />
                     <button
                       type="button"
-                      onClick={onSendOtp}
-                      disabled={isAuthBusy || otpResendSeconds > 0}
-                      className="flex min-h-13 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                      onClick={onContinueWithGoogle}
+                      disabled={isAuthBusy}
+                      className="flex min-h-12 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-70 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
                     >
-                      {otpResendSeconds > 0 ? `Resend ${otpResendSeconds}s` : otpSent ? 'Resend code' : 'Send code'}
+                      Continue with Google
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onContinueAsGuest}
+                      className="flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-5 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
+                    >
+                      Continue as Guest with Phone
                     </button>
                   </div>
-                  <BookingField
-                    name="otpCode"
-                    value={otpCode}
-                    onChange={onOtpCodeChange}
-                    placeholder="6-digit code"
-                    inputMode="numeric"
-                    maxLength={6}
-                    required
-                  />
-                  {devOtpCode && (
-                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                      Dev code: {devOtpCode}
-                    </p>
-                  )}
-                </div>
-              )}
+                )}
 
-              {authError && (
-                <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                  {authError}
-                </div>
-              )}
-            </div>
+                {authStep === 'otp' && (
+                  <div className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <BookingField
+                        name="fullName"
+                        value={customerProfile.fullName}
+                        onChange={onProfileChange}
+                        placeholder="Full name"
+                        error={profileErrors.fullName}
+                        required
+                      />
+                      <BookingField
+                        name="email"
+                        type="email"
+                        value={customerProfile.email}
+                        onChange={onProfileChange}
+                        placeholder="Email optional"
+                        error={profileErrors.email}
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                      <BookingField
+                        name="otpPhone"
+                        value={otpPhone}
+                        onChange={onOtpPhoneChange}
+                        placeholder="Phone number"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={onSendOtp}
+                        disabled={isAuthBusy || otpResendSeconds > 0}
+                        className="flex min-h-13 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                      >
+                        {otpResendSeconds > 0 ? `Resend ${otpResendSeconds}s` : otpSent ? 'Resend code' : 'Send code'}
+                      </button>
+                    </div>
+                    <BookingField
+                      name="otpCode"
+                      value={otpCode}
+                      onChange={onOtpCodeChange}
+                      placeholder="6-digit code"
+                      inputMode="numeric"
+                      maxLength={6}
+                      required
+                    />
+                    {devOtpCode && (
+                      <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                        Dev code: {devOtpCode}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {authError && (
+                  <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                    {authError}
+                  </div>
+                )}
+              </div>
+            )}
 
             <textarea
               name="specialInstructions"
@@ -2372,7 +2499,9 @@ function RideSelectionView({
               >
                 {isSubmitting
                   ? 'Booking...'
-                  : `Confirm ${selectedRideOption?.name ?? 'Miles Eco'} • ${formatMoney(totalPrice)}`}
+                  : requiresManualConfirmation
+                    ? 'Request confirmation'
+                    : `Confirm ${selectedRideOption?.name ?? 'Miles Eco'} • ${formatMoney(totalPrice)}`}
               </button>
             </div>
           </div>
@@ -3019,8 +3148,10 @@ function getManualPinConfirmationLabel(selection: ManualPinSelection) {
 
 async function getRoutePriceQuote(
   pickupLocation: string,
-  dropoffLocation: string
-): Promise<FixedRoutePrice | null> {
+  dropoffLocation: string,
+  pickupLatitude?: number | null,
+  pickupLongitude?: number | null
+): Promise<RoutePriceQuoteResult> {
   const publicOverrides = await loadPublicTripOverridesForPricing();
   const clientOverrideMatch = matchTripOverride(publicOverrides, pickupLocation, dropoffLocation);
   const clientOverrideDebug = createTripOverrideDebugInfo({
@@ -3032,18 +3163,26 @@ async function getRoutePriceQuote(
   });
 
   logTripOverrideDebug('client preflight before fare display', clientOverrideDebug);
+  let serverServiceability: FixedRoutePrice['serviceability'];
 
   try {
     const response = await fetch('/api/pricing/outstation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pickupLocation, dropoffLocation }),
+      body: JSON.stringify({ pickupLocation, dropoffLocation, pickupLatitude, pickupLongitude }),
     });
     const data = (await response.json()) as PublicOutstationQuoteResponse;
     const quote = data.data;
+    serverServiceability = quote?.serviceability ?? data.serviceability;
+
+    if (!response.ok) {
+      return {
+        priceQuote: null,
+        message: data.error || PICKUP_UNSERVICEABLE_MESSAGE,
+      };
+    }
 
     if (
-      response.ok &&
       quote &&
       !quote.customPricingRequired &&
       typeof quote.sedanPrice === 'number'
@@ -3057,35 +3196,36 @@ async function getRoutePriceQuote(
         priceSource: quote.priceSource ?? 'route',
         tripOverrideId: quote.tripOverrideId ?? null,
         overrideDebug: quote.overrideDebug ?? clientOverrideDebug,
+        serviceability: serverServiceability,
       };
 
       if (clientOverrideMatch) {
-        return buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug);
+        return { priceQuote: buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug, serverServiceability) };
       }
 
       console.info('[Trip Override] final customer fare source', serverQuote.priceSource ?? 'calculated');
-      return serverQuote;
+      return { priceQuote: serverQuote };
     }
 
     if (quote?.customPricingRequired && !clientOverrideMatch) {
-      return null;
+      return { priceQuote: null, message: UNAVAILABLE_ROUTE_MESSAGE };
     }
   } catch (error) {
     console.info('[Trip Override] public quote API failed before final fare layer', error);
-    // Static fallback keeps existing fixed-route behavior available if the quote API is offline.
+    return { priceQuote: null, message: PICKUP_UNSERVICEABLE_MESSAGE };
   }
 
   if (clientOverrideMatch) {
-    return buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug);
+    return { priceQuote: buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug, serverServiceability) };
   }
 
-  const staticQuote = getFixedRoutePrice(pickupLocation, dropoffLocation);
-  return staticQuote ? { ...staticQuote, overrideDebug: clientOverrideDebug } : null;
+  return { priceQuote: null, message: UNAVAILABLE_ROUTE_MESSAGE };
 }
 
 function buildTripOverridePriceQuote(
   match: TripOverrideMatch,
-  overrideDebug: TripOverrideDebugInfo
+  overrideDebug: TripOverrideDebugInfo,
+  serviceability?: FixedRoutePrice['serviceability']
 ): FixedRoutePrice {
   const sedanPrice = getTripOverrideSedanPrice(match.override);
   const nextDebug: TripOverrideDebugInfo = {
@@ -3106,6 +3246,7 @@ function buildTripOverridePriceQuote(
     priceSource: 'override',
     tripOverrideId: match.override.id,
     overrideDebug: nextDebug,
+    serviceability,
   };
 }
 
@@ -3151,22 +3292,36 @@ function readBrowserTripOverrides() {
   }
 }
 
-async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<FixedRoutePrice | null> {
+async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<RoutePriceQuoteResult> {
   const coordinateQuote = getCoordinateFallbackPriceQuote(formData);
   const hasManualPin =
     formData.pickupLocationSource === 'manual_pin' ||
     formData.dropoffLocationSource === 'manual_pin';
-  const routeQuote = await getRoutePriceQuote(formData.pickupLocation, formData.dropoffLocation);
+  const routeQuote = await getRoutePriceQuote(
+    formData.pickupLocation,
+    formData.dropoffLocation,
+    formData.pickupLatitude,
+    formData.pickupLongitude
+  );
 
-  if (routeQuote?.priceSource === 'override') {
+  if (routeQuote.priceQuote?.priceSource === 'override') {
+    return routeQuote;
+  }
+
+  if (!routeQuote.priceQuote) {
     return routeQuote;
   }
 
   if (hasManualPin && coordinateQuote) {
-    return coordinateQuote;
+    return {
+      priceQuote: {
+        ...coordinateQuote,
+        serviceability: routeQuote.priceQuote.serviceability,
+      },
+    };
   }
 
-  return routeQuote ?? coordinateQuote;
+  return routeQuote;
 }
 
 function normalizeRouteLabel(value: string) {

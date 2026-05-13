@@ -14,7 +14,7 @@ export default function BookingsList({ initialBookings }: { initialBookings: Ser
   const [hiddenIds, setHiddenIds] = useState(new Set<string>())
 
   const handleStatusChange = (bookingId: string, status: BookingStatusValue) => {
-    if (status === 'COMPLETED' || status === 'CANCELLED') {
+    if (status === 'COMPLETE' || status === 'CANCELLED') {
       setFadingIds(prev => new Set(prev).add(bookingId))
       setTimeout(() => {
         setHiddenIds(prev => new Set(prev).add(bookingId))
@@ -25,7 +25,7 @@ export default function BookingsList({ initialBookings }: { initialBookings: Ser
   return (
     <div className="space-y-3">
       {bookings
-        .filter(booking => booking.status !== 'COMPLETED' && booking.status !== 'CANCELLED')
+        .filter(booking => booking.status !== 'COMPLETE' && booking.status !== 'CANCELLED')
         .map(booking => {
           if (hiddenIds.has(booking.id)) return null
 

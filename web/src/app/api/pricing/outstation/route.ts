@@ -13,9 +13,12 @@ import {
   logTripOverrideDebug,
   matchTripOverride,
 } from '@/lib/tripOverrides';
+import { isPickupServiceable } from '@/lib/operationalZones';
 
 const quoteSchema = z.object({
   pickupLocation: z.string().trim().min(1),
+  pickupLatitude: z.number().finite().nullable().optional(),
+  pickupLongitude: z.number().finite().nullable().optional(),
   dropoffLocation: z.string().trim().min(1),
   distanceKm: z.number().finite().positive().nullable().optional(),
 });
@@ -27,6 +30,28 @@ export async function POST(request: NextRequest) {
 
     if (!result.success) {
       return NextResponse.json({ error: 'Invalid route details' }, { status: 400 });
+    }
+
+    const serviceability = await isPickupServiceable(
+      prisma,
+      result.data.pickupLocation,
+      result.data.pickupLatitude,
+      result.data.pickupLongitude,
+      'SEDAN',
+      'ONE_WAY',
+      result.data.dropoffLocation
+    );
+
+    if (!serviceability.serviceable) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: serviceability.message,
+          code: serviceability.code,
+          serviceability: serializeServiceability(serviceability),
+        },
+        { status: 400 }
+      );
     }
 
     const tripOverrides = await readTripOverrides();
@@ -63,6 +88,7 @@ export async function POST(request: NextRequest) {
           priceSource: 'override',
           tripOverrideId: overrideMatch.override.id,
           overrideDebug: overrideDebugInfo,
+          serviceability: serializeServiceability(serviceability),
         },
       });
     }
@@ -86,10 +112,20 @@ export async function POST(request: NextRequest) {
         priceSource: quote.routeId ? 'route' : 'calculated',
         tripOverrideId: null,
         overrideDebug: overrideDebugInfo,
+        serviceability: serializeServiceability(serviceability),
       },
     });
   } catch (error) {
     console.error('Outstation pricing quote error:', error);
     return NextResponse.json({ error: 'Unable to check route pricing' }, { status: 500 });
   }
+}
+
+function serializeServiceability(serviceability: Awaited<ReturnType<typeof isPickupServiceable>>) {
+  return {
+    status: serviceability.confirmation === 'manual' ? 'manual_confirmation' : serviceability.confirmation === 'instant' ? 'available' : 'unavailable',
+    message: serviceability.message,
+    code: serviceability.code,
+    zoneCity: serviceability.zone?.city ?? null,
+  };
 }

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
 export const bookingRecordSelect = {
   id: true,
@@ -90,6 +90,30 @@ export type BookingRecord = Prisma.BookingGetPayload<{
 
 export type SerializedBooking = ReturnType<typeof serializeBooking>;
 
+type BookingReadClient = Pick<PrismaClient, 'booking' | '$queryRawUnsafe'> | Prisma.TransactionClient;
+
+export async function findBookingRecords(
+  client: BookingReadClient,
+  options: {
+    activeOnly?: boolean;
+    take?: number;
+  } = {}
+): Promise<BookingRecord[]> {
+  const take = options.take ?? 1000;
+
+  try {
+    return await client.booking.findMany({
+      where: options.activeOnly ? { status: { notIn: ['COMPLETE', 'CANCELLED'] } } : undefined,
+      select: bookingRecordSelect,
+      orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
+      take,
+    });
+  } catch (error) {
+    console.warn('Prisma booking.findMany failed; falling back to raw booking read:', error instanceof Error ? error.message : error);
+    return findBookingRecordsRaw(client, { activeOnly: options.activeOnly, take });
+  }
+}
+
 export function createBookingReference(id: string, createdAt: Date | string): string {
   const createdAtDate = typeof createdAt === 'string' ? new Date(createdAt) : createdAt;
   return `UM-${createdAtDate.toISOString().slice(0, 10).replace(/-/g, '')}-${id.slice(0, 8)}`;
@@ -97,6 +121,251 @@ export function createBookingReference(id: string, createdAt: Date | string): st
 
 function serializeMoney(value: Prisma.Decimal | null): number | null {
   return value === null ? null : Number(value);
+}
+
+type RawBookingRecord = {
+  id: string;
+  bookingReference: string;
+  bookingType: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  pickupLocation: string;
+  pickupLatitude: number | null;
+  pickupLongitude: number | null;
+  pickupPlaceId: string | null;
+  pickupLocationSource: string | null;
+  dropoffLocation: string;
+  dropoffLatitude: number | null;
+  dropoffLongitude: number | null;
+  dropoffPlaceId: string | null;
+  dropoffLocationSource: string | null;
+  pickupDateTime: Date;
+  carType: string;
+  specialInstructions: string | null;
+  internalNotes: string | null;
+  status: string;
+  paymentStatus: string;
+  assignmentType: string | null;
+  driverId: string | null;
+  vendorId: string | null;
+  vehicleId: string | null;
+  assignedAt: Date | null;
+  confirmedAt: Date | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  cancelledAt: Date | null;
+  cancelReason: string | null;
+  fareAmount: Prisma.Decimal | null;
+  commissionAmount: Prisma.Decimal | null;
+  payoutAmount: Prisma.Decimal | null;
+  netEarningAmount: Prisma.Decimal | null;
+  driverEarning: Prisma.Decimal | null;
+  paymentReceivedAt: Date | null;
+  manualVendorName: string | null;
+  manualDriverName: string | null;
+  manualDriverPhone: string | null;
+  manualVehicleDetails: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  driverName: string | null;
+  driverPhone: string | null;
+  driverIsActive: boolean | null;
+  driverType: string | null;
+  driverAvailabilityStatus: string | null;
+  driverEmail: string | null;
+  vendorName: string | null;
+  vendorPhone: string | null;
+  vendorContactPerson: string | null;
+  vehiclePlateNumber: string | null;
+  vehicleModel: string | null;
+  vehicleType: string | null;
+  vehicleOwnershipType: string | null;
+  vehicleStatus: string | null;
+  customerPublicId: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+};
+
+async function findBookingRecordsRaw(
+  client: BookingReadClient,
+  options: {
+    activeOnly?: boolean;
+    take: number;
+  }
+): Promise<BookingRecord[]> {
+  const activeWhere = options.activeOnly
+    ? `WHERE b."status"::text NOT IN ('COMPLETE', 'COMPLETED', 'CANCELLED')`
+    : '';
+  const rows = await client.$queryRawUnsafe<RawBookingRecord[]>(
+    `
+      SELECT
+        b."id",
+        b."bookingReference",
+        b."bookingType"::text AS "bookingType",
+        b."fullName",
+        b."email",
+        b."phone",
+        b."pickupLocation",
+        b."pickupLatitude",
+        b."pickupLongitude",
+        b."pickupPlaceId",
+        b."pickupLocationSource"::text AS "pickupLocationSource",
+        b."dropoffLocation",
+        b."dropoffLatitude",
+        b."dropoffLongitude",
+        b."dropoffPlaceId",
+        b."dropoffLocationSource"::text AS "dropoffLocationSource",
+        b."pickupDateTime",
+        b."carType"::text AS "carType",
+        b."specialInstructions",
+        b."internalNotes",
+        b."status"::text AS "status",
+        b."paymentStatus"::text AS "paymentStatus",
+        b."assignmentType"::text AS "assignmentType",
+        b."driverId",
+        b."vendorId",
+        b."vehicleId",
+        b."assignedAt",
+        b."confirmedAt",
+        b."startedAt",
+        b."completedAt",
+        b."cancelledAt",
+        b."cancelReason",
+        b."fareAmount",
+        b."commissionAmount",
+        b."payoutAmount",
+        b."netEarningAmount",
+        b."driverEarning",
+        b."paymentReceivedAt",
+        b."manualVendorName",
+        b."manualDriverName",
+        b."manualDriverPhone",
+        b."manualVehicleDetails",
+        b."createdAt",
+        b."updatedAt",
+        d."name" AS "driverName",
+        d."phone" AS "driverPhone",
+        d."isActive" AS "driverIsActive",
+        d."driverType"::text AS "driverType",
+        d."availabilityStatus"::text AS "driverAvailabilityStatus",
+        d."email" AS "driverEmail",
+        vnd."name" AS "vendorName",
+        vnd."phone" AS "vendorPhone",
+        vnd."contactPerson" AS "vendorContactPerson",
+        veh."plateNumber" AS "vehiclePlateNumber",
+        veh."model" AS "vehicleModel",
+        veh."vehicleType"::text AS "vehicleType",
+        veh."ownershipType"::text AS "vehicleOwnershipType",
+        veh."status"::text AS "vehicleStatus",
+        c."publicId" AS "customerPublicId",
+        c."name" AS "customerName",
+        c."phone" AS "customerPhone",
+        c."email" AS "customerEmail"
+      FROM "Booking" b
+      LEFT JOIN "Driver" d ON d."id" = b."driverId"
+      LEFT JOIN "Vendor" vnd ON vnd."id" = b."vendorId"
+      LEFT JOIN "Vehicle" veh ON veh."id" = b."vehicleId"
+      LEFT JOIN "Customer" c ON c."id" = b."customerId"
+      ${activeWhere}
+      ORDER BY b."pickupDateTime" ASC, b."createdAt" DESC
+      LIMIT $1
+    `,
+    options.take
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    bookingReference: row.bookingReference,
+    bookingType: row.bookingType,
+    fullName: row.fullName,
+    email: row.email,
+    phone: row.phone,
+    pickupLocation: row.pickupLocation,
+    pickupLatitude: row.pickupLatitude,
+    pickupLongitude: row.pickupLongitude,
+    pickupPlaceId: row.pickupPlaceId,
+    pickupLocationSource: row.pickupLocationSource,
+    dropoffLocation: row.dropoffLocation,
+    dropoffLatitude: row.dropoffLatitude,
+    dropoffLongitude: row.dropoffLongitude,
+    dropoffPlaceId: row.dropoffPlaceId,
+    dropoffLocationSource: row.dropoffLocationSource,
+    pickupDateTime: row.pickupDateTime,
+    carType: row.carType,
+    specialInstructions: row.specialInstructions,
+    internalNotes: row.internalNotes,
+    status: normalizeBookingStatus(row.status),
+    paymentStatus: row.paymentStatus,
+    assignmentType: row.assignmentType,
+    driverId: row.driverId,
+    vendorId: row.vendorId,
+    vehicleId: row.vehicleId,
+    assignedAt: row.assignedAt,
+    confirmedAt: row.confirmedAt,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    cancelledAt: row.cancelledAt,
+    cancelReason: row.cancelReason,
+    fareAmount: row.fareAmount,
+    commissionAmount: row.commissionAmount,
+    payoutAmount: row.payoutAmount,
+    netEarningAmount: row.netEarningAmount,
+    driverEarning: row.driverEarning,
+    paymentReceivedAt: row.paymentReceivedAt,
+    manualVendorName: row.manualVendorName,
+    manualDriverName: row.manualDriverName,
+    manualDriverPhone: row.manualDriverPhone,
+    manualVehicleDetails: row.manualVehicleDetails,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    driver: row.driverId
+      ? {
+          id: row.driverId,
+          name: row.driverName ?? '',
+          phone: row.driverPhone ?? '',
+          isActive: row.driverIsActive ?? false,
+          driverType: row.driverType ?? 'THIRD_PARTY',
+          availabilityStatus: row.driverAvailabilityStatus ?? 'OFFLINE',
+          email: row.driverEmail,
+        }
+      : null,
+    vendor: row.vendorId
+      ? {
+          id: row.vendorId,
+          name: row.vendorName ?? '',
+          phone: row.vendorPhone ?? '',
+          contactPerson: row.vendorContactPerson,
+        }
+      : null,
+    vehicle: row.vehicleId
+      ? {
+          id: row.vehicleId,
+          plateNumber: row.vehiclePlateNumber ?? '',
+          model: row.vehicleModel ?? '',
+          vehicleType: row.vehicleType ?? 'SEDAN',
+          ownershipType: row.vehicleOwnershipType ?? 'THIRD_PARTY',
+          status: row.vehicleStatus ?? 'ACTIVE',
+        }
+      : null,
+    customer: row.customerPublicId
+      ? {
+          publicId: row.customerPublicId,
+          name: row.customerName ?? row.fullName,
+          phone: row.customerPhone,
+          email: row.customerEmail,
+        }
+      : null,
+  })) as BookingRecord[];
+}
+
+function normalizeBookingStatus(status: string) {
+  if (status === 'NEW' || status === 'CONFIRMED' || status === 'LEGACY_NEW' || status === 'legacy_new') {
+    return 'NEEDS_ASSIGNMENT';
+  }
+  if (status === 'COMPLETED') return 'COMPLETE';
+  return status;
 }
 
 export function serializeBooking(booking: BookingRecord) {

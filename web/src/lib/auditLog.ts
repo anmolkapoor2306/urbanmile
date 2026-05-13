@@ -26,7 +26,7 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
       },
     });
   } catch (err) {
-    console.error('[Audit Log] Failed to write audit log:', err);
+    console.warn('[Audit Log] Failed to write audit log:', err instanceof Error ? err.message : err);
   }
 }
 

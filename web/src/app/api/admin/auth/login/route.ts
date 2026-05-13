@@ -54,8 +54,8 @@ export async function POST(request: NextRequest) {
     setAdminSessionCookie(response, token);
     return response;
   } catch (error) {
-    console.error('Admin login error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.warn('Admin login error:', error instanceof Error ? error.message : error);
+    return NextResponse.json({ error: 'Admin login is temporarily unavailable. Please try again.' }, { status: 503 });
   }
 }
 

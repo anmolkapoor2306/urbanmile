@@ -1,4 +1,4 @@
-export const BOOKING_STATUSES = ['NEW', 'CONFIRMED', 'ASSIGNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const;
+export const BOOKING_STATUSES = ['NEEDS_ASSIGNMENT', 'ASSIGNED', 'ACTIVE', 'COMPLETE', 'CANCELLED'] as const;
 export const DRIVER_TYPES = ['OWN', 'THIRD_PARTY', 'VENDOR'] as const;
 export const PAYMENT_STATUSES = ['UNPAID', 'PAID', 'PENDING', 'REFUNDED', 'PARTIAL'] as const;
 export const ASSIGNMENT_TYPES = ['OWN_DRIVER', 'OUTSOURCED_DRIVER', 'MANUAL_OUTSOURCED'] as const;
@@ -12,21 +12,19 @@ export const dispatchGroups: Array<{
   key: BookingStatusValue;
   title: string;
 }> = [
-  { key: 'NEW', title: 'Legacy New' },
-  { key: 'CONFIRMED', title: 'Needs Assignment' },
+  { key: 'NEEDS_ASSIGNMENT', title: 'Needs Assignment' },
   { key: 'ASSIGNED', title: 'Assigned / Upcoming' },
   { key: 'ACTIVE', title: 'Active' },
-  { key: 'COMPLETED', title: 'Completed' },
+  { key: 'COMPLETE', title: 'Complete' },
   { key: 'CANCELLED', title: 'Cancelled' },
 ];
 
 export function getBookingStatusLabel(status: BookingStatusValue): string {
   const labelMap: Record<BookingStatusValue, string> = {
-    NEW: 'Legacy New',
-    CONFIRMED: 'Needs Assignment',
+    NEEDS_ASSIGNMENT: 'Needs Assignment',
     ASSIGNED: 'Assigned',
     ACTIVE: 'Active',
-    COMPLETED: 'Complete',
+    COMPLETE: 'Complete',
     CANCELLED: 'Cancelled',
   };
   return labelMap[status];

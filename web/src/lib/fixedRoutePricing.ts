@@ -21,6 +21,12 @@ export type FixedRoutePrice = {
   priceSource?: 'override' | 'route' | 'coordinate' | 'static' | 'calculated';
   tripOverrideId?: string | null;
   overrideDebug?: TripOverrideDebugInfo;
+  serviceability?: {
+    status: 'available' | 'manual_confirmation' | 'unavailable';
+    message: string | null;
+    code?: string;
+    zoneCity?: string | null;
+  };
 };
 
 export type {

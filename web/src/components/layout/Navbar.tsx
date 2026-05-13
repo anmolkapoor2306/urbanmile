@@ -1,20 +1,81 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Menu, Search, X } from 'lucide-react';
+import { ChevronDown, LogOut, Menu, Search, UserRound, X } from 'lucide-react';
 import { CONTACT_PHONE_HREF } from '@/lib/contact';
 import { useTheme } from '@/context/ThemeContext';
 import { FindBookingFormModal } from '@/components/form/FindBookingForm';
+import { getFirstName } from '@/lib/customerDisplay';
+
+type NavbarCustomer = {
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+};
 
 export function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const [findBookingOpen, setFindBookingOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [customer, setCustomer] = useState<NavbarCustomer | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCustomer() {
+      try {
+        const response = await fetch('/api/customer/auth/me', {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          if (!cancelled) setCustomer(null);
+          return;
+        }
+
+        const data = await response.json() as { customer?: NavbarCustomer };
+        if (!cancelled) setCustomer(data.customer ?? null);
+      } catch {
+        if (!cancelled) setCustomer(null);
+      } finally {
+        if (!cancelled) setAuthLoaded(true);
+      }
+    }
+
+    void loadCustomer();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, []);
 
   const openFindBooking = () => {
     setFindBookingOpen(true);
     setMobileMenuOpen(false);
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/customer/auth/logout', { method: 'POST', credentials: 'include' });
+    setCustomer(null);
+    setAccountMenuOpen(false);
+    setMobileMenuOpen(false);
+    window.location.href = '/';
   };
 
   return (
@@ -46,20 +107,37 @@ export function Navbar() {
               >
                 Call Now
               </a>
-              <button
-                type="button"
-                onClick={openFindBooking}
-                className="hidden min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900 md:inline-flex lg:min-h-11 lg:px-5"
-              >
-                <Search className="h-4 w-4" aria-hidden="true" />
-                Find Booking
-              </button>
-              <Link
-                href="/login"
-                className="hidden min-h-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900 md:inline-flex lg:min-h-11 lg:px-5"
-              >
-                Login / Sign Up
-              </Link>
+              {!customer && (
+                <button
+                  type="button"
+                  onClick={openFindBooking}
+                  className="hidden min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900 md:inline-flex lg:min-h-11 lg:px-5"
+                >
+                  <Search className="h-4 w-4" aria-hidden="true" />
+                  Find Booking
+                </button>
+              )}
+              <div className="hidden md:block">
+                {customer ? (
+                  <CustomerAccountMenu
+                    customer={customer}
+                    isOpen={accountMenuOpen}
+                    menuRef={accountMenuRef}
+                    onToggle={() => setAccountMenuOpen((isOpen) => !isOpen)}
+                    onClose={() => setAccountMenuOpen(false)}
+                    onLogout={handleLogout}
+                  />
+                ) : !authLoaded ? (
+                  <div className="h-10 w-32 rounded-full border border-zinc-200 dark:border-zinc-800 lg:h-11" aria-hidden="true" />
+                ) : (
+                  <Link
+                    href="/login"
+                    className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900 lg:min-h-11 lg:px-5"
+                  >
+                    Login / Sign Up
+                  </Link>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -86,15 +164,32 @@ export function Navbar() {
                 <MobileLink href="/#ride" onClick={() => setMobileMenuOpen(false)}>Ride</MobileLink>
                 <MobileLink href="/#help" onClick={() => setMobileMenuOpen(false)}>Help</MobileLink>
                 <MobileLink href="/#about" onClick={() => setMobileMenuOpen(false)}>About</MobileLink>
-                <button
-                  type="button"
-                  onClick={openFindBooking}
-                  className="flex min-h-11 items-center justify-between rounded-[16px] px-3 text-left text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                >
-                  Find Booking
-                  <Search className="h-4 w-4 text-zinc-500" aria-hidden="true" />
-                </button>
-                <MobileLink href="/login" onClick={() => setMobileMenuOpen(false)}>Login / Sign Up</MobileLink>
+                {!customer && (
+                  <button
+                    type="button"
+                    onClick={openFindBooking}
+                    className="flex min-h-11 items-center justify-between rounded-[16px] px-3 text-left text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  >
+                    Find Booking
+                    <Search className="h-4 w-4 text-zinc-500" aria-hidden="true" />
+                  </button>
+                )}
+                {customer ? (
+                  <>
+                    <MobileLink href="/customer/dashboard" onClick={() => setMobileMenuOpen(false)}>Profile</MobileLink>
+                    <MobileLink href="/customer/account" onClick={() => setMobileMenuOpen(false)}>Manage account</MobileLink>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="flex min-h-11 items-center justify-between rounded-[16px] px-3 text-left text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                    >
+                      Logout
+                      <LogOut className="h-4 w-4 text-zinc-500" aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <MobileLink href="/login" onClick={() => setMobileMenuOpen(false)}>Login / Sign Up</MobileLink>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -114,6 +209,80 @@ export function Navbar() {
 
       <FindBookingFormModal isOpen={findBookingOpen} onClose={() => setFindBookingOpen(false)} />
     </>
+  );
+}
+
+function CustomerAccountMenu({
+  customer,
+  isOpen,
+  menuRef,
+  onToggle,
+  onClose,
+  onLogout,
+}: {
+  customer: NavbarCustomer;
+  isOpen: boolean;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  onToggle: () => void;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
+  const firstName = getFirstName(customer.fullName);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-900 lg:min-h-11 lg:px-5"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+      >
+        Hi, {firstName}
+        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+      </button>
+
+      {isOpen ? (
+        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-56 rounded-lg border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/30">
+          <AccountMenuLink href="/customer/dashboard" onClick={onClose}>
+            <UserRound className="h-4 w-4" aria-hidden="true" />
+            Profile
+          </AccountMenuLink>
+          <AccountMenuLink href="/customer/account" onClick={onClose}>
+            <UserRound className="h-4 w-4" aria-hidden="true" />
+            Manage account
+          </AccountMenuLink>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            Logout
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenuLink({
+  href,
+  onClick,
+  children,
+}: {
+  href: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex min-h-10 items-center gap-2 rounded-md px-3 text-sm font-bold text-zinc-800 transition-colors hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+    >
+      {children}
+    </Link>
   );
 }
 

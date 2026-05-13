@@ -11,6 +11,7 @@
     "seed:test-bookings": "jiti scripts/seed-test-bookings.ts",
     "seed:demo-drivers": "jiti scripts/seed-demo-drivers.ts",
     "seed:outstation-routes": "jiti scripts/seed-outstation-routes.ts",
+    "seed:operational-zones": "jiti scripts/seed-operational-zones.ts",
     "seed": "jiti scripts/seed-admin.ts"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "lucide-react": "^1.12.0",
     "maplibre-gl": "^5.24.0",
     "next": "16.2.3",
+    "next-auth": "^4.24.14",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-map-gl": "^8.1.1",

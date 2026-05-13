@@ -98,7 +98,7 @@ function buildPlans() {
   return Array.from({ length: TARGET_BOOKING_COUNT }, (_, index): BookingPlan => {
     const route = routes[index % routes.length];
     const carType: CarType = index % 3 === 0 ? 'SUV' : 'SEDAN';
-    const status: BookingStatus = index >= 44 && index < 48 ? 'ASSIGNED' : index >= 48 ? 'ACTIVE' : 'CONFIRMED';
+    const status: BookingStatus = index >= 44 && index < 48 ? 'ASSIGNED' : index >= 48 ? 'ACTIVE' : 'NEEDS_ASSIGNMENT';
     const driverSuffix = String(index + 1).padStart(2, '0');
 
     return {
@@ -112,9 +112,9 @@ function buildPlans() {
       fareAmount: getFareAmount(route, carType),
       status,
       paymentStatus: 'UNPAID',
-      manualDriverName: status === 'CONFIRMED' ? undefined : `Test Driver ${driverSuffix}`,
-      manualDriverPhone: status === 'CONFIRMED' ? undefined : `98888${String(70000 + index).slice(-5)}`,
-      manualVehicleDetails: status === 'CONFIRMED' ? undefined : `${carType} TEST-${driverSuffix}`,
+      manualDriverName: status === 'NEEDS_ASSIGNMENT' ? undefined : `Test Driver ${driverSuffix}`,
+      manualDriverPhone: status === 'NEEDS_ASSIGNMENT' ? undefined : `98888${String(70000 + index).slice(-5)}`,
+      manualVehicleDetails: status === 'NEEDS_ASSIGNMENT' ? undefined : `${carType} TEST-${driverSuffix}`,
     };
   });
 }
@@ -171,7 +171,7 @@ async function main() {
           authProvider: 'PHONE_GUEST',
         });
         const assignmentData =
-          plan.status === 'CONFIRMED'
+          plan.status === 'NEEDS_ASSIGNMENT'
             ? {}
             : {
                 assignmentType: 'MANUAL_OUTSOURCED' as const,

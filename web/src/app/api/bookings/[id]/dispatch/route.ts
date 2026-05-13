@@ -6,6 +6,7 @@ import { requireAdminAuth } from '@/lib/adminAuth';
 import { hasPermission } from '@/lib/authPermissions';
 import { BOOKING_STATUSES, PAYMENT_STATUSES } from '@/lib/dispatch';
 import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
+import { assertOperationalZoneSupportsBooking } from '@/lib/operationalZones';
 
 const moneyField = z.union([z.number().finite().min(0), z.null()]).optional();
 
@@ -100,7 +101,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         vendorId: true,
         vehicleId: true,
         status: true,
+        pickupLocation: true,
+        pickupLatitude: true,
+        pickupLongitude: true,
+        dropoffLocation: true,
         pickupDateTime: true,
+        carType: true,
         fareAmount: true,
         assignmentType: true,
       },
@@ -108,6 +114,28 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    const affectsDispatch =
+      parsed.data.driverId !== undefined ||
+      parsed.data.vendorId !== undefined ||
+      parsed.data.manualDriverName !== undefined ||
+      parsed.data.status === 'ASSIGNED' ||
+      parsed.data.status === 'ACTIVE';
+
+    if (affectsDispatch) {
+      const zoneCheck = await assertOperationalZoneSupportsBooking(prisma, {
+        pickupLocation: booking.pickupLocation,
+        pickupLatitude: booking.pickupLatitude,
+        pickupLongitude: booking.pickupLongitude,
+        dropoffLocation: booking.dropoffLocation,
+        carType: parsed.data.carType ?? booking.carType,
+        bookingMode: 'ONE_WAY',
+      });
+
+      if (!zoneCheck.ok) {
+        return NextResponse.json({ error: zoneCheck.message, code: zoneCheck.code }, { status: 422 });
+      }
     }
 
     const data: Record<string, unknown> = {};
@@ -202,11 +230,11 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (parsed.data.status) {
       data.status = parsed.data.status;
-    } else if (assignmentType && booking.status !== 'ACTIVE' && booking.status !== 'COMPLETED') {
+    } else if (assignmentType && booking.status !== 'ACTIVE' && booking.status !== 'COMPLETE') {
       data.status = 'ASSIGNED';
     }
 
-    if (data.status === 'CONFIRMED') {
+    if (data.status === 'NEEDS_ASSIGNMENT') {
       data.confirmedAt = new Date();
     }
 
@@ -218,7 +246,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       data.startedAt = new Date();
     }
 
-    if (data.status === 'COMPLETED') {
+    if (data.status === 'COMPLETE') {
       data.completedAt = new Date();
     }
 
@@ -236,10 +264,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     if (parsed.data.fareAmount !== undefined) {
       data.fareAmount = serializeMoney(parsed.data.fareAmount);
-      if (parsed.data.fareAmount !== null && booking.status === 'NEW' && !parsed.data.status) {
-        data.status = 'CONFIRMED';
-        data.confirmedAt = new Date();
-      }
     }
 
     const financials = deriveFinancials({
@@ -275,7 +299,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         await releaseDriverIfIdle(tx, booking.driverId);
       }
 
-      if ((updated.status === 'COMPLETED' || updated.status === 'CANCELLED') && activeDriverId) {
+      if ((updated.status === 'COMPLETE' || updated.status === 'CANCELLED') && activeDriverId) {
         await releaseDriverIfIdle(tx, activeDriverId, updated.id);
       }
 

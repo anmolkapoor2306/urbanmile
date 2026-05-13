@@ -14,6 +14,7 @@ import {
   normalizeGender,
   verifyPhoneToken,
 } from '@/lib/customerAuth';
+import { getCurrentCustomerSession } from '@/lib/customerAccountAuth';
 import { z } from 'zod';
 import {
   bookingLocationMetadataSchema,
@@ -26,6 +27,7 @@ import {
   logTripOverrideDebug,
   matchTripOverride,
 } from '@/lib/tripOverrides';
+import { isPickupServiceable } from '@/lib/operationalZones';
 
 const publicBookingSelect = {
   publicBookingId: true,
@@ -54,12 +56,12 @@ const publicBookingSelect = {
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
-  fullName: z.string().min(2, 'Please enter a valid name'),
+  fullName: z.string().optional(),
   email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
-  phone: z.string().min(10, 'Please enter a valid phone number').max(15, 'Phone number too long'),
+  phone: z.string().optional(),
   phoneVerificationToken: z.string().optional(),
   dob: z.string().optional().or(z.literal('')),
-  gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional(),
+  gender: z.enum(['male', 'female', 'non_binary', 'other', 'prefer_not_to_say']).optional(),
   authProvider: z.enum(['google', 'phone_guest']).default('phone_guest'),
   emailVerified: z.boolean().optional(),
   supabaseUserId: z.string().optional(),
@@ -149,9 +151,51 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const serviceability = await isPickupServiceable(
+      prisma,
+      pickupLocation,
+      pickupLatitude,
+      pickupLongitude,
+      carType,
+      bookingMode,
+      dropoffLocation
+    );
+
+    if (!serviceability.serviceable) {
+      return NextResponse.json(
+        { success: false, error: serviceability.message, code: serviceability.code },
+        { status: 400 }
+      );
+    }
+    const manualConfirmationRequired = serviceability.confirmation === 'manual';
+
+    const customerSession = await getCurrentCustomerSession();
+    const loggedInCustomer = customerSession
+      ? await prisma.customer.findUnique({
+          where: { id: customerSession.customerId },
+          select: {
+            id: true,
+            name: true,
+            fullName: true,
+            phone: true,
+            email: true,
+          },
+        })
+      : null;
+    const isLoggedInCustomer = Boolean(loggedInCustomer);
+    const bookingFullName = isLoggedInCustomer
+      ? (loggedInCustomer?.fullName || loggedInCustomer?.name || '').trim()
+      : (fullName || '').trim();
+    const bookingPhone = isLoggedInCustomer
+      ? loggedInCustomer?.phone || ''
+      : phone || '';
+    const bookingEmail = isLoggedInCustomer
+      ? loggedInCustomer?.email || ''
+      : email || '';
+
     const dobDate = dob ? new Date(`${dob}T00:00:00.000Z`) : null;
-    const isFullProfileRequired = authProvider === 'google';
-    if (!fullName.trim() || !phone.trim() || (isFullProfileRequired && (!email?.trim() || !dobDate || Number.isNaN(dobDate.getTime()) || !gender))) {
+    const isFullProfileRequired = !isLoggedInCustomer && authProvider === 'google';
+    if (!bookingFullName || !bookingPhone.trim() || (isFullProfileRequired && (!bookingEmail.trim() || !dobDate || Number.isNaN(dobDate.getTime()) || !gender))) {
       return NextResponse.json(
         { success: false, error: 'Customer details are incomplete' },
         { status: 400 }
@@ -179,7 +223,7 @@ export async function POST(request: NextRequest) {
     );
 
     const bookings = await prisma.$transaction(async (tx) => {
-      const normalizedPhone = normalizeCustomerPhone(phone);
+      const normalizedPhone = normalizeCustomerPhone(bookingPhone);
       const ipAddress = getClientIp(request);
       const isAllowed = await assertRateLimit(tx, {
         action: 'booking_create',
@@ -191,14 +235,16 @@ export async function POST(request: NextRequest) {
         throw new PublicBookingError('BOOKING_RATE_LIMITED');
       }
 
-      if (!phoneVerificationToken) {
+      if (!isLoggedInCustomer && !phoneVerificationToken) {
         throw new PublicBookingError('PHONE_VERIFICATION_REQUIRED');
       }
 
-      const isPhoneVerified = await verifyPhoneToken(tx, {
-        phone: normalizedPhone,
-        token: phoneVerificationToken,
-      });
+      const isPhoneVerified = isLoggedInCustomer
+        ? true
+        : await verifyPhoneToken(tx, {
+            phone: normalizedPhone,
+            token: phoneVerificationToken || '',
+          });
 
       if (!isPhoneVerified) {
         throw new PublicBookingError('PHONE_VERIFICATION_REQUIRED');
@@ -215,32 +261,35 @@ export async function POST(request: NextRequest) {
         throw new PublicBookingError('DUPLICATE_ACTIVE_BOOKING');
       }
 
-      const customer = await getOrCreateBookingCustomer(tx, {
-        name: fullName,
-        phone: normalizedPhone,
-        email,
-        phoneVerified: true,
-        emailVerified: emailVerified ?? authProvider === 'google',
-        dob: dobDate,
-        gender: gender ? normalizeGender(gender) : null,
-        authProvider: normalizeAuthProvider(authProvider),
-        supabaseUserId: supabaseUserId || null,
-      });
+      const customer = loggedInCustomer
+        ? { id: loggedInCustomer.id }
+        : await getOrCreateBookingCustomer(tx, {
+            name: bookingFullName,
+            phone: normalizedPhone,
+            email: bookingEmail,
+            phoneVerified: true,
+            emailVerified: emailVerified ?? authProvider === 'google',
+            dob: dobDate,
+            gender: gender ? normalizeGender(gender) : null,
+            authProvider: normalizeAuthProvider(authProvider),
+            supabaseUserId: supabaseUserId || null,
+          });
       const baseId = crypto.randomUUID();
       const baseReference = createBookingReference(baseId, pickupAt);
       const basePublicBookingId = await createBasePublicBookingId(tx, pickupAt);
       const legPrice = tripOverrideFare ?? fareAmount ?? null;
       const commonData = {
         bookingType,
-        fullName,
-        email: email || '',
+        fullName: bookingFullName,
+        email: bookingEmail,
         phone: normalizedPhone,
         customerId: customer.id,
         carType,
         fareAmount: legPrice,
         specialInstructions: specialInstructions || null,
-        status: 'CONFIRMED' as const,
-        confirmedAt: new Date(),
+        status: 'NEEDS_ASSIGNMENT' as const,
+        confirmedAt: manualConfirmationRequired ? null : new Date(),
+        internalNotes: manualConfirmationRequired ? 'Manual confirmation required by Operations Control.' : null,
       };
 
       const buildLegacyData = ({
@@ -405,7 +454,7 @@ function serializePublicBooking(booking: {
   customer: {
     publicId: string;
     name: string;
-    phone: string;
+    phone: string | null;
     email: string | null;
   } | null;
 }) {

@@ -4,15 +4,18 @@ import { AdminPageFrame, AdminPanel } from '@/components/admin/AdminLayout';
 import { DispatchBoard } from '@/components/admin/DispatchBoard';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
+import type { SerializedOperationalZone } from '@/lib/operationalZoneRules';
 
 export function DispatchPageWrapper({
   drivers,
   bookings,
+  operationalZones,
   loadError,
   adminRole,
 }: {
   drivers: SerializedDriver[];
   bookings: SerializedBooking[];
+  operationalZones: SerializedOperationalZone[];
   loadError: string | null;
   adminRole?: string;
 }) {
@@ -25,7 +28,7 @@ export function DispatchPageWrapper({
             </AdminPanel>
           ) : null}
 
-          <DispatchBoard drivers={drivers} bookings={bookings} />
+          <DispatchBoard drivers={drivers} bookings={bookings} operationalZones={operationalZones} />
         </div>
     </AdminPageFrame>
   );

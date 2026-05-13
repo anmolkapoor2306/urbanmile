@@ -9,9 +9,9 @@ const OTP_REQUEST_LIMIT = 5;
 const BOOKING_CREATE_LIMIT = 8;
 const RATE_WINDOW_MINUTES = 15;
 
-export const CUSTOMER_GENDERS = ['male', 'female', 'other', 'prefer_not_to_say'] as const;
+export const CUSTOMER_GENDERS = ['male', 'female', 'non_binary', 'other', 'prefer_not_to_say'] as const;
 export type CustomerGenderInput = (typeof CUSTOMER_GENDERS)[number];
-export type CustomerAuthProviderInput = 'google' | 'phone_guest';
+export type CustomerAuthProviderInput = 'google' | 'manual' | 'phone_guest';
 
 export function getClientIp(request: NextRequest) {
   return (
@@ -22,10 +22,12 @@ export function getClientIp(request: NextRequest) {
 }
 
 export function normalizeGender(gender: CustomerGenderInput) {
+  if (gender === 'non_binary') return 'NON_BINARY';
   return gender.toUpperCase() as 'MALE' | 'FEMALE' | 'OTHER' | 'PREFER_NOT_TO_SAY';
 }
 
 export function normalizeAuthProvider(provider: CustomerAuthProviderInput) {
+  if (provider === 'manual') return 'MANUAL';
   return provider === 'google' ? 'GOOGLE' : 'PHONE_GUEST';
 }
 
@@ -204,7 +206,7 @@ export async function hasFreshDuplicateBooking(
       pickupLocation,
       dropoffLocation,
       pickupDateTime,
-      status: { in: ['CONFIRMED', 'ASSIGNED', 'ACTIVE'] },
+      status: { in: ['NEEDS_ASSIGNMENT', 'ASSIGNED', 'ACTIVE'] },
       createdAt: { gte: minutesAgo(10) },
     },
     select: { publicBookingId: true },

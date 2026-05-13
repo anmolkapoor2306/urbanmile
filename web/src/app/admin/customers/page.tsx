@@ -48,8 +48,8 @@ export default async function CustomersPage() {
                 return (
                   <div key={customer.id} className="grid gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900 md:grid-cols-6">
                     <Info label="Customer ID" value={customer.publicId} />
-                    <Info label="Name" value={customer.name} />
-                    <Info label="Phone" value={customer.phone} />
+                    <Info label="Name" value={customer.fullName || customer.name} />
+                    <Info label="Phone" value={customer.phone || 'Profile incomplete'} />
                     <Info label="Email" value={customer.email || 'Not provided'} />
                     <Info label="Bookings" value={String(customer.bookings.length)} />
                     <Info label="Total Spent" value={formatMoney(totalSpent)} helper={latestBooking ? `Latest ${formatDate(latestBooking.pickupDateTime)}` : undefined} />

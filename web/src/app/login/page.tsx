@@ -1,31 +1,29 @@
-'use client';
-
-import Link from 'next/link';
+import { Suspense } from 'react';
+import Image from 'next/image';
 import { Navbar } from '@/components/layout/Navbar';
+import { CustomerLogin } from '@/components/customer/CustomerLogin';
+
+export const dynamic = 'force-dynamic';
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white">
+    <main className="relative min-h-screen overflow-hidden bg-zinc-950 text-white">
+      <Image
+        src="/images/urbanmiles-login-bg.png"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        className="z-0 object-cover opacity-70"
+      />
+      <div className="absolute inset-0 z-0 bg-[linear-gradient(90deg,rgba(9,9,11,0.92)_0%,rgba(9,9,11,0.72)_45%,rgba(9,9,11,0.84)_100%)]" />
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_35%_18%,rgba(245,158,11,0.20),transparent_30%),radial-gradient(circle_at_75%_78%,rgba(251,191,36,0.12),transparent_28%),linear-gradient(180deg,rgba(9,9,11,0.38),rgba(9,9,11,0.90))]" />
       <Navbar />
-      <section className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-3xl items-center px-4 py-12 md:px-5">
-        <div className="w-full rounded-[28px] border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-10">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-amber-600 dark:text-amber-300">
-            UrbanMiles account
-          </p>
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-zinc-950 dark:text-white">
-            Login / Sign Up
-          </h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400">
-            Customer accounts are coming soon. You can still book a ride with phone verification and check existing bookings from the navbar.
-          </p>
-          <Link
-            href="/#ride"
-            className="mt-7 inline-flex min-h-12 items-center justify-center rounded-full bg-zinc-950 px-6 text-sm font-bold text-white transition-colors hover:bg-zinc-800 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
-          >
-            Book a Ride
-          </Link>
-        </div>
-      </section>
+      <div className="relative z-10">
+        <Suspense fallback={<div className="mx-auto flex min-h-[calc(100vh-72px)] w-full max-w-6xl items-center px-4 text-zinc-300">Loading...</div>}>
+          <CustomerLogin />
+        </Suspense>
+      </div>
     </main>
   );
 }

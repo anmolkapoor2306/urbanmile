@@ -39,7 +39,7 @@ export default async function FinancePage() {
       .map((booking) => booking.fareAmount)
   );
   const unpaidCompletedTrips = bookings.filter(
-    (booking) => booking.status === 'COMPLETED' && booking.paymentStatus !== 'PAID'
+    (booking) => booking.status === 'COMPLETE' && booking.paymentStatus !== 'PAID'
   );
   const unpaidBalance = sumMoney(unpaidCompletedTrips.map((booking) => booking.fareAmount));
   const paidTrips = bookings.filter((booking) => booking.paymentStatus === 'PAID');

@@ -62,13 +62,7 @@ const STATUS_PILLS: Array<{
   inactiveClassName: string;
 }> = [
   {
-    value: 'NEW',
-    label: 'Legacy New',
-    activeClassName: 'bg-zinc-700 text-white',
-    inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
-  },
-  {
-    value: 'CONFIRMED',
+    value: 'NEEDS_ASSIGNMENT',
     label: 'Needs Assignment',
     activeClassName: 'bg-amber-500 text-zinc-950',
     inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
@@ -86,7 +80,7 @@ const STATUS_PILLS: Array<{
     inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
   },
   {
-    value: 'COMPLETED',
+    value: 'COMPLETE',
     label: 'Complete',
     activeClassName: 'bg-green-500 text-white dark:bg-green-600',
     inactiveClassName: 'border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
@@ -114,7 +108,7 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
 
     return [...bookings]
       .filter((booking) => {
-        const isArchivedStatus = booking.status === 'COMPLETED' || booking.status === 'CANCELLED';
+        const isArchivedStatus = booking.status === 'COMPLETE' || booking.status === 'CANCELLED';
         const matchesArchive = showArchived ? isArchivedStatus : !isArchivedStatus;
         const matchesStatus = filterStatus === 'all' || booking.status === filterStatus;
         const matchesPaymentStatus = filterPaymentStatus === 'all' || booking.paymentStatus === filterPaymentStatus;
@@ -158,11 +152,10 @@ export function BookingTable({ bookings }: { bookings: AdminBooking[] }) {
               className={cn(adminInputClassName, 'md:w-[220px]')}
             >
               <option value="all">All Statuses</option>
-              <option value="NEW">Legacy New</option>
-              <option value="CONFIRMED">Needs Assignment</option>
+              <option value="NEEDS_ASSIGNMENT">Needs Assignment</option>
               <option value="ASSIGNED">Assigned</option>
               <option value="ACTIVE">Active</option>
-              <option value="COMPLETED">Completed</option>
+              <option value="COMPLETE">Complete</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
 
@@ -248,7 +241,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [archiveState, setArchiveState] = useState<{
     previousStatus: BookingStatusValue;
-    nextStatus: 'COMPLETED' | 'CANCELLED';
+    nextStatus: 'COMPLETE' | 'CANCELLED';
   } | null>(null);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
@@ -323,7 +316,7 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
         throw new Error(data.error || 'Failed to update booking status');
       }
 
-      if (nextStatus === 'COMPLETED' || nextStatus === 'CANCELLED') {
+      if (nextStatus === 'COMPLETE' || nextStatus === 'CANCELLED') {
         clearArchiveTimers();
         setArchiveState({ previousStatus, nextStatus });
         setIsFadingOut(false);
@@ -415,7 +408,6 @@ function BookingCard({ booking }: { booking: AdminBooking }) {
 
     await updateDispatch({
       fareAmount: parsedFare,
-      status: booking.status === 'NEW' ? 'CONFIRMED' : booking.status,
     });
   }
 

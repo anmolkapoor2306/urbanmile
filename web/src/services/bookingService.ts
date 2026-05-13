@@ -6,10 +6,24 @@ import {
   normalizeCustomerPhone,
 } from '@/lib/publicBookingIds';
 import { toPrismaBookingLocationSource } from '@/lib/bookingLocation';
+import { assertOperationalZoneSupportsBooking } from '@/lib/operationalZones';
 import { CreateBookingInput, UpdateBookingStatusInput } from '@/types';
 
 export const createBooking = async (input: CreateBookingInput) => {
   try {
+    const zoneCheck = await assertOperationalZoneSupportsBooking(prisma, {
+      pickupLocation: input.pickupLocation,
+      pickupLatitude: input.pickupLatitude,
+      pickupLongitude: input.pickupLongitude,
+      dropoffLocation: input.dropoffLocation,
+      carType: input.carType,
+      bookingMode: 'ONE_WAY',
+    });
+
+    if (!zoneCheck.ok) {
+      return { success: false, error: zoneCheck.message };
+    }
+
     const booking = await prisma.$transaction(async (tx) => {
       const id = crypto.randomUUID();
       const customer = await getOrCreateBookingCustomer(tx, {
@@ -42,7 +56,7 @@ export const createBooking = async (input: CreateBookingInput) => {
           carType: input.carType,
           fareAmount: input.fareAmount ?? null,
           specialInstructions: input.specialInstructions ?? null,
-          status: 'CONFIRMED',
+          status: 'NEEDS_ASSIGNMENT',
           confirmedAt: new Date(),
         },
         select: bookingRecordSelect,
@@ -57,13 +71,13 @@ export const createBooking = async (input: CreateBookingInput) => {
   }
 };
 
-export const getBookings = async (status?: 'NEW' | 'CONFIRMED' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED', limit = 100) => {
+export const getBookings = async (status?: 'NEEDS_ASSIGNMENT' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETE' | 'CANCELLED', limit = 100) => {
   try {
     const bookings = await prisma.booking.findMany({
       select: bookingRecordSelect,
       take: limit,
       orderBy: { createdAt: 'desc' },
-      where: status ? { status } : { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+      where: status ? { status } : { status: { notIn: ['COMPLETE', 'CANCELLED'] } },
     });
     return { success: true, data: bookings };
   } catch (error) {

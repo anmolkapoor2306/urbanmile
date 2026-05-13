@@ -7,8 +7,8 @@ type BookingCustomerInput = {
   phoneVerified?: boolean;
   emailVerified?: boolean;
   dob?: Date | string | null;
-  gender?: 'MALE' | 'FEMALE' | 'OTHER' | 'PREFER_NOT_TO_SAY' | null;
-  authProvider?: 'GOOGLE' | 'PHONE_GUEST' | null;
+  gender?: 'MALE' | 'FEMALE' | 'NON_BINARY' | 'OTHER' | 'PREFER_NOT_TO_SAY' | null;
+  authProvider?: 'GOOGLE' | 'MANUAL' | 'PHONE_GUEST' | null;
   supabaseUserId?: string | null;
 };
 
@@ -29,6 +29,7 @@ export async function getOrCreateBookingCustomer(
   const phone = normalizeCustomerPhone(input.phone);
   const profileData = {
     name: input.name,
+    fullName: input.name,
     email: input.email || null,
     phoneVerified: input.phoneVerified ?? true,
     emailVerified: input.emailVerified ?? false,
@@ -46,6 +47,7 @@ export async function getOrCreateBookingCustomer(
           id: true,
           publicId: true,
           name: true,
+          fullName: true,
           phone: true,
           email: true,
           createdAt: true,
@@ -63,6 +65,7 @@ export async function getOrCreateBookingCustomer(
         where: { id: existingCustomer.id },
         data: {
           name: profileData.name,
+          fullName: profileData.fullName,
           email: existingCustomer.email || profileData.email,
         },
         select: {
@@ -79,6 +82,7 @@ export async function getOrCreateBookingCustomer(
 
     const shouldUpdate =
       existingCustomer.name !== input.name ||
+      existingCustomer.fullName !== input.name ||
       (!existingCustomer.email && Boolean(input.email)) ||
       !existingCustomer.phoneVerified ||
       !existingCustomer.dob ||
@@ -94,6 +98,7 @@ export async function getOrCreateBookingCustomer(
       where: { id: existingCustomer.id },
       data: {
         name: profileData.name,
+        fullName: profileData.fullName,
         email: existingCustomer.email || profileData.email,
         phoneVerified: existingCustomer.phoneVerified || profileData.phoneVerified,
         emailVerified: existingCustomer.emailVerified || profileData.emailVerified,
@@ -111,14 +116,15 @@ export async function getOrCreateBookingCustomer(
       id: string;
       publicId: string;
       name: string;
+      fullName: string;
       phone: string;
       email: string | null;
       createdAt: Date;
       updatedAt: Date;
     }>>`
-      INSERT INTO "Customer" ("publicId", "name", "phone", "email")
-      VALUES (${publicId}, ${profileData.name}, ${phone}, ${profileData.email})
-      RETURNING "id", "publicId", "name", "phone", "email", "createdAt", "updatedAt"
+      INSERT INTO "Customer" ("publicId", "name", "fullName", "phone", "email")
+      VALUES (${publicId}, ${profileData.name}, ${profileData.fullName}, ${phone}, ${profileData.email})
+      RETURNING "id", "publicId", "name", "fullName", "phone", "email", "createdAt", "updatedAt"
     `;
 
     return rows[0];
@@ -128,6 +134,7 @@ export async function getOrCreateBookingCustomer(
     data: {
       publicId: await createCustomerPublicId(tx),
       name: profileData.name,
+      fullName: profileData.fullName,
       phone,
       email: profileData.email,
       phoneVerified: profileData.phoneVerified,
@@ -155,31 +162,61 @@ async function customerAuthColumnsExist(tx: Prisma.TransactionClient) {
 }
 
 export async function createCustomerPublicId(tx: Prisma.TransactionClient) {
-  const nextValue = await nextCustomerSequenceValue(tx);
-  return `CUS-${String(nextValue).padStart(4, '0')}`;
+  try {
+    const nextValue = await nextCustomerSequenceValue(tx);
+    return `CUS-${String(nextValue).padStart(4, '0')}`;
+  } catch (error) {
+    console.warn('Customer public ID sequence unavailable; using timestamp fallback.', {
+      error: error instanceof Error ? error.message : 'unknown',
+    });
+    return `CUS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  }
 }
 
 export async function createBasePublicBookingId(
   tx: Prisma.TransactionClient,
   pickupDateTime: Date
 ) {
-  const nextValue = await nextBookingSequenceValue(tx);
   const year = pickupDateTime.getFullYear();
-  return `UM-${year}-${String(nextValue).padStart(4, '0')}`;
+  try {
+    const nextValue = await nextBookingSequenceValue(tx);
+    return `UM-${year}-${String(nextValue).padStart(4, '0')}`;
+  } catch (error) {
+    console.warn('Booking public ID sequence unavailable; using timestamp fallback.', {
+      error: error instanceof Error ? error.message : 'unknown',
+    });
+    return `UM-${year}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  }
 }
 
 async function nextCustomerSequenceValue(tx: Prisma.TransactionClient) {
-  const rows = await tx.$queryRaw<Array<{ value: bigint }>>`
-    SELECT nextval('customer_public_id_seq')::bigint AS value
+  const rows = await tx.$queryRaw<Array<{ value: bigint | null }>>`
+    SELECT
+      CASE
+        WHEN to_regclass('public.customer_public_id_seq') IS NULL THEN NULL
+        ELSE nextval('public.customer_public_id_seq'::text)::bigint
+      END AS value
   `;
 
-  return Number(rows[0]?.value ?? 1);
+  if (rows[0]?.value === null || rows[0]?.value === undefined) {
+    throw new Error('customer_public_id_seq is missing');
+  }
+
+  return Number(rows[0].value);
 }
 
 async function nextBookingSequenceValue(tx: Prisma.TransactionClient) {
-  const rows = await tx.$queryRaw<Array<{ value: bigint }>>`
-    SELECT nextval('booking_public_id_seq')::bigint AS value
+  const rows = await tx.$queryRaw<Array<{ value: bigint | null }>>`
+    SELECT
+      CASE
+        WHEN to_regclass('public.booking_public_id_seq') IS NULL THEN NULL
+        ELSE nextval('public.booking_public_id_seq'::text)::bigint
+      END AS value
   `;
 
-  return Number(rows[0]?.value ?? 1);
+  if (rows[0]?.value === null || rows[0]?.value === undefined) {
+    throw new Error('booking_public_id_seq is missing');
+  }
+
+  return Number(rows[0].value);
 }

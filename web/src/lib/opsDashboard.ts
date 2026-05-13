@@ -58,13 +58,13 @@ export function getBookingDisplayAssignee(booking: AssigneeBooking) {
 export function buildBookingMetrics(bookings: SerializedBooking[]) {
   const now = new Date();
   const completedToday = bookings.filter(
-    (booking) => booking.status === 'COMPLETED' && booking.completedAt && isSameDay(new Date(booking.completedAt), now)
+    (booking) => booking.status === 'COMPLETE' && booking.completedAt && isSameDay(new Date(booking.completedAt), now)
   );
 
   const todaysBookings = bookings.filter((booking) => isSameDay(new Date(booking.createdAt), now));
   const unpaidBookings = bookings.filter((booking) => booking.paymentStatus !== 'PAID');
   const needsAssignment = bookings.filter(
-    (booking) => booking.status === 'CONFIRMED' && !hasAssignedDriver(booking)
+    (booking) => booking.status === 'NEEDS_ASSIGNMENT' && !hasAssignedDriver(booking)
   );
   const assignedUpcoming = bookings.filter(
     (booking) => booking.status === 'ASSIGNED' && hasPickupInFuture(booking, now)
@@ -74,20 +74,18 @@ export function buildBookingMetrics(bookings: SerializedBooking[]) {
     (booking) => (booking.status === 'ASSIGNED' || booking.status === 'ACTIVE') && hasAssignedDriver(booking)
   );
   const upcomingTrips = [...bookings]
-    .filter((booking) => !['COMPLETED', 'CANCELLED'].includes(booking.status) && hasPickupInFuture(booking, now))
+    .filter((booking) => !['COMPLETE', 'CANCELLED'].includes(booking.status) && hasPickupInFuture(booking, now))
     .sort((a, b) => +new Date(a.pickupDateTime) - +new Date(b.pickupDateTime))
     .slice(0, 5);
 
   return {
     total: bookings.length,
-    new: bookings.filter((booking) => booking.status === 'NEW').length,
     pendingConfirmation: needsAssignment.length,
     needsAssignment: needsAssignment.length,
-    confirmed: bookings.filter((booking) => booking.status === 'CONFIRMED').length,
     assigned: assignedUpcoming.length,
     assignedUpcoming: assignedUpcoming.length,
     inProgress: bookings.filter((booking) => booking.status === 'ACTIVE').length,
-    completed: bookings.filter((booking) => booking.status === 'COMPLETED').length,
+    completed: bookings.filter((booking) => booking.status === 'COMPLETE').length,
     completedToday: completedToday.length,
     cancelled: bookings.filter((booking) => booking.status === 'CANCELLED').length,
     activeTripsCount: activeTrips.length,

@@ -69,7 +69,7 @@ export async function deleteAdminSessionByToken(token: string) {
 }
 
 export async function validateSessionTokenInDB(token: string) {
-  return prisma.adminSession.findFirst({
+  return prisma.adminSession.findUnique({
     where: { token },
     include: {
       user: {

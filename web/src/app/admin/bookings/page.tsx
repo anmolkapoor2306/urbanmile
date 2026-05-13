@@ -2,10 +2,9 @@ import { redirect } from 'next/navigation';
 import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/adminAuth';
 import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
-import { bookingRecordSelect, serializeBooking } from '@/lib/bookingRecord';
+import { findBookingRecords, serializeBooking } from '@/lib/bookingRecord';
 import { AdminPageFrame, AdminPanel, AdminStatsGrid, AdminStatCard } from '@/components/admin/AdminLayout';
 import { BookingTable } from '@/components/admin/BookingTable';
-import { BOOKING_STATUSES } from '@/lib/dispatch';
 import { AdminEmptyState } from '@/components/admin/AdminEmptyState';
 
 export const dynamic = 'force-dynamic';
@@ -21,13 +20,9 @@ export default async function AdminBookingsPage() {
   let bookings;
 
   try {
-    bookings = await prisma.booking.findMany({
-      select: bookingRecordSelect,
-      orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
-      take: 1000,
-    });
+    bookings = await findBookingRecords(prisma, { take: 1000 });
   } catch (error) {
-    console.error('Failed to load admin bookings:', error);
+    console.warn('Failed to load admin bookings:', error instanceof Error ? error.message : error);
 
     return (
       <AdminPageFrame currentPage="bookings" adminRole={session?.role}>
@@ -40,11 +35,11 @@ export default async function AdminBookingsPage() {
   }
 
   const serializedBookings = bookings.map(serializeBooking);
-  const activeBookings = serializedBookings.filter((booking) => !['COMPLETED', 'CANCELLED'].includes(booking.status));
+  const activeBookings = serializedBookings.filter((booking) => !['COMPLETE', 'CANCELLED'].includes(booking.status));
 
-  const activeCount = activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[3]).length;
-  const completedCount = serializedBookings.filter((booking) => booking.status === BOOKING_STATUSES[4]).length;
-  const cancelledCount = serializedBookings.filter((booking) => booking.status === BOOKING_STATUSES[5]).length;
+  const activeCount = activeBookings.filter((booking) => booking.status === 'ACTIVE').length;
+  const completedCount = serializedBookings.filter((booking) => booking.status === 'COMPLETE').length;
+  const cancelledCount = serializedBookings.filter((booking) => booking.status === 'CANCELLED').length;
 
   return (
     <AdminPageFrame currentPage="bookings" adminRole={session?.role}>
@@ -52,10 +47,10 @@ export default async function AdminBookingsPage() {
         <AdminStatsGrid className="md:grid-cols-3 xl:grid-cols-6">
               {[
                 ['Total', serializedBookings.length],
-                ['Needs Assignment', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[1] && !booking.driverId).length],
-                ['Assigned', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[2]).length],
+                ['Needs Assignment', activeBookings.filter((booking) => booking.status === 'NEEDS_ASSIGNMENT' && !booking.driverId).length],
+                ['Assigned', activeBookings.filter((booking) => booking.status === 'ASSIGNED').length],
                 ['Active', activeCount],
-                ['Completed', completedCount],
+                ['Complete', completedCount],
                 ['Cancelled', cancelledCount],
               ].map(([label, value]) => (
                 <AdminStatCard key={label} label={label} value={value} className="text-center" />

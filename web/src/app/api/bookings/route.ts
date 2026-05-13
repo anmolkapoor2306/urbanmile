@@ -15,6 +15,7 @@ import {
   bookingLocationMetadataSchema,
   toPrismaBookingLocationSource,
 } from '@/lib/bookingLocation';
+import { assertOperationalZoneSupportsBooking } from '@/lib/operationalZones';
 
 const bookingSchema = z.object({
   bookingType: z.enum(['PERSONAL', 'BUSINESS']),
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
 
     const where: Prisma.BookingWhereInput = status && BOOKING_STATUSES.includes(status as (typeof BOOKING_STATUSES)[number])
       ? { status: status as (typeof BOOKING_STATUSES)[number] }
-      : { status: { notIn: ['COMPLETED', 'CANCELLED'] } };
+      : { status: { notIn: ['COMPLETE', 'CANCELLED'] } };
 
     const bookings = await prisma.booking.findMany({
       where,
@@ -103,6 +104,19 @@ export async function POST(request: NextRequest) {
     } = parsed.data;
     const pickupAt = new Date(pickupDateTime);
 
+    const zoneCheck = await assertOperationalZoneSupportsBooking(prisma, {
+      pickupLocation,
+      pickupLatitude,
+      pickupLongitude,
+      dropoffLocation,
+      carType,
+      bookingMode: 'ONE_WAY',
+    });
+
+    if (!zoneCheck.ok) {
+      return NextResponse.json({ error: zoneCheck.message, code: zoneCheck.code }, { status: 422 });
+    }
+
     const booking = await prisma.$transaction(async (tx) => {
       const id = crypto.randomUUID();
       const customer = await getOrCreateBookingCustomer(tx, { name: fullName, phone, email });
@@ -130,7 +144,7 @@ export async function POST(request: NextRequest) {
           pickupDateTime: pickupAt,
           carType,
           specialInstructions: specialInstructions || null,
-          status: 'CONFIRMED',
+          status: 'NEEDS_ASSIGNMENT',
           confirmedAt: new Date(),
         },
         select: bookingRecordSelect,

@@ -29,7 +29,7 @@ model Booking {
   carType               CarType                @default(SEDAN)
   specialInstructions   String?
   internalNotes         String?
-  status                BookingStatus          @default(NEW)
+  status                BookingStatus          @default(NEEDS_ASSIGNMENT)
   paymentStatus         PaymentStatus          @default(UNPAID)
   assignmentType        AssignmentType?
   createdAt             DateTime               @default(now()) @db.Timestamp(6)
@@ -77,21 +77,43 @@ model Customer {
   id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   publicId       String             @unique
   name           String
-  phone          String             @unique
-  email          String?
+  fullName       String             @default("")
+  phone          String?            @unique
+  email          String?            @unique
   phoneVerified  Boolean            @default(false)
   emailVerified  Boolean            @default(false)
   dob            DateTime?          @db.Date
   gender         CustomerGender?
   authProvider   CustomerAuthProvider?
+  passwordHash   String?
+  googleId       String?            @unique
+  role           CustomerRole       @default(CUSTOMER)
   supabaseUserId String?            @unique
   createdAt      DateTime           @default(now()) @db.Timestamp(6)
   updatedAt      DateTime           @default(now()) @updatedAt @db.Timestamp(6)
   bookings       Booking[]
+  sessions       CustomerSession[]
 
   @@index([publicId])
   @@index([phone])
+  @@index([email])
+  @@index([googleId])
   @@index([supabaseUserId])
+}
+
+model CustomerSession {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId String  @db.Uuid
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime @db.Timestamp(6)
+  createdAt DateTime @default(now()) @db.Timestamp(6)
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model CustomerOtpVerification {
@@ -231,12 +253,27 @@ model TripOverride {
   @@index([active])
 }
 
+model OperationalZone {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  city                String
+  status              OperationalZoneStatus    @default(ENABLED)
+  serviceRadiusKm     Int                      @default(25) @map("service_radius_km")
+  airportEnabled      Boolean                  @default(true) @map("airport_enabled")
+  outstationEnabled   Boolean                  @default(true) @map("outstation_enabled")
+  autoDispatchEnabled Boolean                  @default(true) @map("auto_dispatch_enabled")
+  enabledVehicleTypes OperationalVehicleType[] @default([SEDAN]) @map("enabled_vehicle_types")
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([city])
+  @@index([status])
+}
+
 enum BookingStatus {
-  NEW
-  CONFIRMED
+  NEEDS_ASSIGNMENT
   ASSIGNED
   ACTIVE
-  COMPLETED
+  COMPLETE
   CANCELLED
 }
 
@@ -275,13 +312,19 @@ enum PaymentStatus {
 enum CustomerGender {
   MALE
   FEMALE
+  NON_BINARY
   OTHER
   PREFER_NOT_TO_SAY
 }
 
 enum CustomerAuthProvider {
+  MANUAL
   GOOGLE
   PHONE_GUEST
+}
+
+enum CustomerRole {
+  CUSTOMER
 }
 
 enum AssignmentType {
@@ -307,6 +350,18 @@ enum BookingLocationSource {
   AUTOCOMPLETE
   MANUAL_PIN
   CURRENT_LOCATION
+}
+
+enum OperationalZoneStatus {
+  ENABLED
+  LIMITED
+  DISABLED
+}
+
+enum OperationalVehicleType {
+  SEDAN
+  SUV
+  PREMIUM
 }
 
 model AdminUser {

@@ -16,9 +16,9 @@ function buildStatusUpdateData(status: (typeof BOOKING_STATUSES)[number]) {
 
   return {
     status,
-    confirmedAt: status === 'CONFIRMED' ? now : undefined,
-    startedAt: status === 'ACTIVE' ? now : status === 'NEW' || status === 'CONFIRMED' || status === 'ASSIGNED' ? null : undefined,
-    completedAt: status === 'COMPLETED' ? now : null,
+    confirmedAt: status === 'NEEDS_ASSIGNMENT' ? now : undefined,
+    startedAt: status === 'ACTIVE' ? now : status === 'NEEDS_ASSIGNMENT' || status === 'ASSIGNED' ? null : undefined,
+    completedAt: status === 'COMPLETE' ? now : null,
     cancelledAt: status === 'CANCELLED' ? now : null,
   };
 }
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         });
       }
 
-      if (existingBooking.driverId && (parsed.data.status === 'COMPLETED' || parsed.data.status === 'CANCELLED')) {
+      if (existingBooking.driverId && (parsed.data.status === 'COMPLETE' || parsed.data.status === 'CANCELLED')) {
         await releaseDriverIfIdle(tx, existingBooking.driverId, existingBooking.id);
       }
 

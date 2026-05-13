@@ -1,11 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AdminPanel, adminInputClassName, adminSecondaryButtonClassName } from '@/components/admin/AdminLayout';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
+import { isBookingDispatchableByZone, type SerializedOperationalZone } from '@/lib/operationalZoneRules';
 import { buildGoogleMapsRouteUrl, formatCoordinatePair } from '@/lib/maps';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn, getCarTypeDisplay } from '@/lib/utils';
@@ -15,9 +17,11 @@ type QueueFilter = 'ALL' | 'SEDAN' | 'SUV' | 'TODAY' | 'TOMORROW';
 export function DispatchBoard({
   drivers,
   bookings,
+  operationalZones,
 }: {
   drivers: SerializedDriver[];
   bookings: SerializedBooking[];
+  operationalZones: SerializedOperationalZone[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -32,10 +36,11 @@ export function DispatchBoard({
   const needsAssignment = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.status === 'CONFIRMED' && !booking.driverId && !booking.vendorId && !booking.manualDriverName)
+        .filter((booking) => booking.status === 'NEEDS_ASSIGNMENT' && !booking.driverId && !booking.vendorId && !booking.manualDriverName)
+        .filter((booking) => isBookingDispatchableByZone(operationalZones, booking))
         .filter((booking) => matchesQueueFilter(booking, filter))
         .sort((a, b) => +new Date(a.pickupDateTime) - +new Date(b.pickupDateTime)),
-    [bookings, filter]
+    [bookings, filter, operationalZones]
   );
 
   const selectedBooking = selectedBookingId
@@ -106,11 +111,19 @@ export function DispatchBoard({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <div className="shrink-0">
-        <h1 className="text-2xl font-black tracking-tight text-zinc-950 dark:text-white">Dispatch</h1>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Assign controlled drivers, avoid conflicts, and move trips through the live workflow.
-        </p>
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-zinc-950 dark:text-white">Dispatch</h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Assign controlled drivers, avoid conflicts, and move trips through the live workflow.
+          </p>
+        </div>
+        <Link
+          href="/admin/dispatch/operations"
+          className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-bold text-zinc-800 transition-colors hover:border-zinc-950 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-500 dark:hover:bg-zinc-900"
+        >
+          Operations Control
+        </Link>
       </div>
 
       {message ? (
@@ -121,7 +134,7 @@ export function DispatchBoard({
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.95fr_1.1fr_0.95fr]">
         <AdminPanel className="flex min-h-0 flex-col overflow-hidden p-4">
-          <PanelTitle title="Needs Assignment" subtitle="Confirmed bookings waiting for a driver." count={needsAssignment.length} />
+          <PanelTitle title="Needs Assignment" subtitle="Bookings waiting for a driver." count={needsAssignment.length} />
           <div className="mb-4 flex flex-wrap gap-2">
             {(['ALL', 'SEDAN', 'SUV', 'TODAY', 'TOMORROW'] as QueueFilter[]).map((item) => (
               <button
@@ -206,12 +219,12 @@ export function DispatchBoard({
                 </LifecycleButton>
                 <LifecycleButton
                   disabled={!selectedBooking || selectedBooking.status !== 'ACTIVE' || isSaving}
-                  onClick={() => selectedBooking && void updateBooking(selectedBooking, { status: 'COMPLETED' }, 'Trip completed.')}
+                  onClick={() => selectedBooking && void updateBooking(selectedBooking, { status: 'COMPLETE' }, 'Trip completed.')}
                 >
                   Mark Complete
                 </LifecycleButton>
                 <LifecycleButton
-                  disabled={!selectedBooking || isSaving || selectedBooking.status === 'COMPLETED' || selectedBooking.status === 'CANCELLED'}
+                  disabled={!selectedBooking || isSaving || selectedBooking.status === 'COMPLETE' || selectedBooking.status === 'CANCELLED'}
                   onClick={() => selectedBooking && confirm('Cancel this trip?') && void updateBooking(selectedBooking, { status: 'CANCELLED' }, 'Trip cancelled.')}
                 >
                   Cancel Trip

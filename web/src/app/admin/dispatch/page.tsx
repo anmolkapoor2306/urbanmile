@@ -3,7 +3,9 @@ import { isCurrentAdminAuthenticated, getCurrentAdminSession } from '@/lib/admin
 import { canAccessPage } from '@/lib/authPermissions';
 import prisma from '@/lib/prisma';
 import { driverRecordSelect, serializeDriver, type DriverRecord } from '@/lib/driverRecord';
-import { bookingRecordSelect, serializeBooking, type BookingRecord } from '@/lib/bookingRecord';
+import { findBookingRecords, serializeBooking, type BookingRecord } from '@/lib/bookingRecord';
+import { getOperationalZones } from '@/lib/operationalZones';
+import { isBookingDispatchableByZone, type SerializedOperationalZone } from '@/lib/operationalZoneRules';
 import { DispatchPageWrapper } from './page-client';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +20,7 @@ export default async function DispatchPage() {
 
   let drivers: DriverRecord[] = [];
   let bookings: BookingRecord[] = [];
+  let operationalZones: SerializedOperationalZone[] = [];
   let loadError: string | null = null;
 
   try {
@@ -31,21 +34,24 @@ export default async function DispatchPage() {
   }
 
   try {
-    bookings = await prisma.booking.findMany({
-      where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-      select: bookingRecordSelect,
-      orderBy: [{ pickupDateTime: 'asc' }, { createdAt: 'desc' }],
-      take: 1000,
-    });
+    bookings = await findBookingRecords(prisma, { activeOnly: true, take: 1000 });
   } catch (error) {
     console.error('Failed to load bookings for dispatch dashboard:', error);
     loadError = 'Database connection is unavailable. Showing available dispatch data only.';
   }
 
+  try {
+    operationalZones = await getOperationalZones(prisma);
+  } catch (error) {
+    console.warn('Failed to load operational zones for dispatch dashboard:', error instanceof Error ? error.message : error);
+    loadError = 'Operational zones are unavailable. Dispatch queue may show unfiltered bookings.';
+  }
+
   return (
     <DispatchPageWrapper
       drivers={drivers.map(serializeDriver)}
-      bookings={bookings.map(serializeBooking)}
+      bookings={bookings.map(serializeBooking).filter((booking) => isBookingDispatchableByZone(operationalZones, booking))}
+      operationalZones={operationalZones}
       loadError={loadError}
       adminRole={session?.role}
     />
