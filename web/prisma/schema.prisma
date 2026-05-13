@@ -316,6 +316,8 @@ model AdminUser {
   username      String    @unique
   passwordHash  String
   role          AdminRole @default(VIEWER)
+  status        AdminUserStatus @default(ACTIVE)
+  phone         String?
   isActive      Boolean   @default(true)
   lastLoginAt   DateTime? @db.Timestamp(6)
   createdAt     DateTime  @default(now()) @db.Timestamp(6)
@@ -365,4 +367,10 @@ enum AdminRole {
   DISPATCHER
   FINANCE
   VIEWER
+}
+
+enum AdminUserStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
 }

@@ -107,7 +107,7 @@ async function verifyAdminSessionInDatabase(
     return {
       ...session,
       userId: dbSession.userId,
-      role: dbSession.role,
+      role: dbSession.user.role,
     };
   } catch (error) {
     console.error('Failed to validate admin session:', error);

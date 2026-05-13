@@ -10,6 +10,16 @@ export async function findAdminUserByEmailOrUsername(emailOrUsername: string) {
         { username: emailOrUsername.toLowerCase().trim() },
       ],
     },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      username: true,
+      passwordHash: true,
+      role: true,
+      isActive: true,
+      lastLoginAt: true,
+    },
   });
 }
 
@@ -59,9 +69,17 @@ export async function deleteAdminSessionByToken(token: string) {
 }
 
 export async function validateSessionTokenInDB(token: string) {
-  return prisma.adminSession.findUnique({
+  return prisma.adminSession.findFirst({
     where: { token },
-    include: { user: true },
+    include: {
+      user: {
+        select: {
+          id: true,
+          role: true,
+          isActive: true,
+        },
+      },
+    },
   });
 }
 
