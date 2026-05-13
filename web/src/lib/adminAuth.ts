@@ -27,7 +27,8 @@ export async function parseAdminSession(cookieStore: AdminCookieReader): Promise
 
 export async function getCurrentAdminSession(): Promise<AdminSessionPayload | null> {
   const cookieStore = await cookies();
-  return parseAdminSession(cookieStore);
+  const session = await parseAdminSession(cookieStore);
+  return verifyAdminSessionInDatabase(session);
 }
 
 export async function isCurrentAdminAuthenticated(): Promise<boolean> {
@@ -49,7 +50,7 @@ export async function isAdminAuthenticated(cookieStore: AdminCookieReader): Prom
 }
 
 export async function requireAdminAuth(request: NextRequest): Promise<{ session: AdminSessionPayload } | NextResponse> {
-  const session = await isAdminAuthenticated(request.cookies);
+  const session = await verifyAdminSessionInDatabase(await parseAdminSession(request.cookies));
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -58,7 +59,7 @@ export async function requireAdminAuth(request: NextRequest): Promise<{ session:
 
 export async function requireCurrentAdminAuth(request?: NextRequest): Promise<{ session: AdminSessionPayload } | NextResponse> {
   if (request) {
-    const session = await isAdminAuthenticated(request.cookies);
+    const session = await verifyAdminSessionInDatabase(await parseAdminSession(request.cookies));
     if (session) return { session };
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -69,7 +70,7 @@ export async function requireCurrentAdminAuth(request?: NextRequest): Promise<{ 
 }
 
 export async function checkAdminAuth(request: NextRequest): Promise<AdminSessionPayload | null> {
-  return isAdminAuthenticated(request.cookies);
+  return verifyAdminSessionInDatabase(await parseAdminSession(request.cookies));
 }
 
 export function setAdminSessionCookie(response: NextResponse, token: string): void {
@@ -87,5 +88,29 @@ export function clearAdminSessionCookie(response: NextResponse): void {
 }
 
 export async function validateAdminSession(request: NextRequest): Promise<AdminSessionPayload | null> {
-  return isAdminAuthenticated(request.cookies);
+  return verifyAdminSessionInDatabase(await parseAdminSession(request.cookies));
+}
+
+async function verifyAdminSessionInDatabase(
+  session: AdminSessionPayload | null,
+): Promise<AdminSessionPayload | null> {
+  if (!session) return null;
+
+  try {
+    const { validateSessionTokenInDB } = await import('@/lib/adminAuthPrisma');
+    const dbSession = await validateSessionTokenInDB(session.sessionId);
+
+    if (!dbSession || dbSession.expiresAt <= new Date() || !dbSession.user.isActive) {
+      return null;
+    }
+
+    return {
+      ...session,
+      userId: dbSession.userId,
+      role: dbSession.role,
+    };
+  } catch (error) {
+    console.error('Failed to validate admin session:', error);
+    return null;
+  }
 }

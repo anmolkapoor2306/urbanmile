@@ -43,18 +43,20 @@ export default async function AdminBookingsPage() {
   const activeBookings = serializedBookings.filter((booking) => !['COMPLETED', 'CANCELLED'].includes(booking.status));
 
   const activeCount = activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[3]).length;
+  const completedCount = serializedBookings.filter((booking) => booking.status === BOOKING_STATUSES[4]).length;
+  const cancelledCount = serializedBookings.filter((booking) => booking.status === BOOKING_STATUSES[5]).length;
 
   return (
     <AdminPageFrame currentPage="bookings" adminRole={session?.role}>
       <div className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden">
         <AdminStatsGrid className="md:grid-cols-3 xl:grid-cols-6">
               {[
-                ['Total', activeBookings.length],
+                ['Total', serializedBookings.length],
                 ['Needs Assignment', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[1] && !booking.driverId).length],
                 ['Assigned', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[2]).length],
                 ['Active', activeCount],
-                ['Completed', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[4]).length],
-                ['Cancelled', activeBookings.filter((booking) => booking.status === BOOKING_STATUSES[5]).length],
+                ['Completed', completedCount],
+                ['Cancelled', cancelledCount],
               ].map(([label, value]) => (
                 <AdminStatCard key={label} label={label} value={value} className="text-center" />
               ))}

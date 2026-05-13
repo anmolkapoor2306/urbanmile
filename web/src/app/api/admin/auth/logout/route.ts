@@ -1,21 +1,19 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE_NAME } from '@/lib/sessionToken';
-
-const clearedCookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-  expires: new Date(0),
-  maxAge: 0,
-};
+import { clearAdminSessionCookie, parseAdminSession } from '@/lib/adminAuth';
+import { deleteAdminSessionByToken } from '@/lib/adminAuthPrisma';
 
 export async function POST() {
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE_NAME, '', clearedCookieOptions);
+  const session = await parseAdminSession(cookieStore);
 
-  return NextResponse.json({ success: true });
+  if (session) {
+    await deleteAdminSessionByToken(session.sessionId);
+  }
+
+  const response = NextResponse.json({ success: true });
+  clearAdminSessionCookie(response);
+  return response;
 }
 
 export const dynamic = 'force-dynamic';

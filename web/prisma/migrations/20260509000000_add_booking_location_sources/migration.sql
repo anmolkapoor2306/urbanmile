@@ -1,7 +1,21 @@
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'BookingLocationSource') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'BookingLocationSource') THEN
+    CREATE TYPE "BookingLocationSource" AS ENUM ('MANUAL', 'AUTOCOMPLETE', 'MANUAL_PIN', 'CURRENT_LOCATION');
+  ELSE
+    ALTER TYPE "BookingLocationSource" ADD VALUE IF NOT EXISTS 'MANUAL';
     ALTER TYPE "BookingLocationSource" ADD VALUE IF NOT EXISTS 'AUTOCOMPLETE';
     ALTER TYPE "BookingLocationSource" ADD VALUE IF NOT EXISTS 'MANUAL_PIN';
+    ALTER TYPE "BookingLocationSource" ADD VALUE IF NOT EXISTS 'CURRENT_LOCATION';
   END IF;
 END $$;
+
+ALTER TABLE "Booking"
+  ADD COLUMN IF NOT EXISTS "pickupLatitude" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "pickupLongitude" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "pickupPlaceId" TEXT,
+  ADD COLUMN IF NOT EXISTS "pickupLocationSource" "BookingLocationSource",
+  ADD COLUMN IF NOT EXISTS "dropoffLatitude" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "dropoffLongitude" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "dropoffPlaceId" TEXT,
+  ADD COLUMN IF NOT EXISTS "dropoffLocationSource" "BookingLocationSource";

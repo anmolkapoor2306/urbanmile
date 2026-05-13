@@ -10,12 +10,12 @@ export async function POST(request: NextRequest) {
     const { email, password } = body as { email?: string; password?: string };
 
     if (!email || !password) {
-      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
+      return NextResponse.json({ error: 'Email or username and password are required' }, { status: 400 });
     }
 
     const result = await verifyAdminCredentials(email, password);
     if (!result || !result.user) {
-      return NextResponse.json({ error: 'Invalid credentials. Please check your email and password.' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid credentials. Please check your email or username and password.' }, { status: 401 });
     }
 
     const { user } = result;
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     const session = createSignedSession({
       userId: user.id,
       role: user.role,
+      sessionId: dbSession.token,
     });
     const token = await signSessionToken(session);
 

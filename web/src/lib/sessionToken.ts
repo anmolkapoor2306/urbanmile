@@ -19,8 +19,8 @@ function getSigningKey(): string | null {
   return process.env.ADMIN_SESSION_SECRET || null;
 }
 
-export function createSignedSession(payload: Omit<AdminSessionPayload, 'exp' | 'sessionId'>): AdminSessionPayload {
-  const sessionId = crypto.randomUUID();
+export function createSignedSession(payload: Omit<AdminSessionPayload, 'exp' | 'sessionId'> & { sessionId?: string }): AdminSessionPayload {
+  const sessionId = payload.sessionId ?? crypto.randomUUID();
   const exp = Math.floor(Date.now() / 1000) + SESSION_COOKIE_MAX_AGE;
   const session: AdminSessionPayload = {
     userId: payload.userId,

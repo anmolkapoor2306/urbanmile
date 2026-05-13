@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-import { Decimal } from '@prisma/client';
+import { PrismaClient, type BookingStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -43,12 +42,10 @@ const driverNames = [
 const vehicleBrands = ['Hyundai Verna', 'Maruti Swift Dzire', 'Toyota Innova', 'Honda City', 'Skoda Laura', 'Santro', 'Etios', 'Altroz', 'Ciaz', 'Baleno'];
 const carTypes = ['SEDAN', 'SUV', 'VAN'] as const;
 
-const statuses = ['CONFIRMED', 'ASSIGNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const;
-const paymentStatuses = ['UNPAID', 'PAID', 'PENDING'] as const;
 const bookingTypes = ['PERSONAL', 'BUSINESS'] as const;
 
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-function rand(arr: string[]) { return arr[randInt(0, arr.length - 1)]; }
+function rand<const T>(arr: readonly T[]): T { return arr[randInt(0, arr.length - 1)]; }
 function randFloat(min: number, max: number) { return parseFloat((Math.random() * (max - min) + min).toFixed(2)); }
 function randPhone(): string {
   const prefixes = ['98765', '94182', '98152', '98532', '98734', '94176', '98042', '98723', '94191', '98156', '98530', '98760'];
@@ -142,7 +139,8 @@ async function main() {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   const bookingCount = 50;
 
-  const statusDistribution: Record<string, number> = {
+  const statusDistribution: Record<BookingStatus, number> = {
+    NEW: 0,
     CONFIRMED: 12,
     ASSIGNED: 10,
     ACTIVE: 8,
@@ -150,9 +148,9 @@ async function main() {
     CANCELLED: 5,
   };
 
-  const statusList: string[] = [];
+  const statusList: BookingStatus[] = [];
   for (const [status, count] of Object.entries(statusDistribution)) {
-    statusList.push(...Array(count).fill(status));
+    statusList.push(...Array<BookingStatus>(count).fill(status as BookingStatus));
   }
 
   // Shuffle status list
@@ -165,7 +163,7 @@ async function main() {
   let created = 0;
 
   for (let i = 0; i < bookingCount; i++) {
-    const status = statusList[i] as any;
+    const status = statusList[i];
     const pickupCity = cities[randInt(0, cities.length - 1)];
     let dropoffCity = cities[randInt(0, cities.length - 1)];
     while (dropoffCity.name === pickupCity.name) {

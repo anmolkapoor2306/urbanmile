@@ -12,8 +12,18 @@ async function main() {
     return;
   }
 
-  const existing = await prisma.adminUser.findUnique({
-    where: { email: email.toLowerCase().trim() },
+  const safeEmail = email.toLowerCase().trim();
+  const safeUsername = username
+    ? username.toLowerCase().trim()
+    : safeEmail;
+
+  const existing = await prisma.adminUser.findFirst({
+    where: {
+      OR: [
+        { email: safeEmail },
+        { username: safeUsername },
+      ],
+    },
   });
 
   if (existing) {
@@ -22,14 +32,11 @@ async function main() {
   }
 
   const passwordHash = await hashPassword(password);
-  const safeUsername = username
-    ? username.toLowerCase().trim()
-    : email.toLowerCase().trim();
 
   const user = await prisma.adminUser.create({
     data: {
       name,
-      email: email.toLowerCase().trim(),
+      email: safeEmail,
       username: safeUsername,
       passwordHash,
       role: 'OWNER',

@@ -1,4 +1,4 @@
-CREATE TABLE "OutstationRoute" (
+CREATE TABLE IF NOT EXISTS "OutstationRoute" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "originCity" TEXT NOT NULL,
   "destinationCity" TEXT NOT NULL,
@@ -16,9 +16,9 @@ CREATE TABLE "OutstationRoute" (
   CONSTRAINT "OutstationRoute_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "OutstationRoute_originCity_destinationCity_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "OutstationRoute_originCity_destinationCity_key"
   ON "OutstationRoute" ("originCity", "destinationCity");
 
-CREATE INDEX "OutstationRoute_originCity_idx" ON "OutstationRoute" ("originCity");
-CREATE INDEX "OutstationRoute_destinationCity_idx" ON "OutstationRoute" ("destinationCity");
-CREATE INDEX "OutstationRoute_isActive_idx" ON "OutstationRoute" ("isActive");
+CREATE INDEX IF NOT EXISTS "OutstationRoute_originCity_idx" ON "OutstationRoute" ("originCity");
+CREATE INDEX IF NOT EXISTS "OutstationRoute_destinationCity_idx" ON "OutstationRoute" ("destinationCity");
+CREATE INDEX IF NOT EXISTS "OutstationRoute_isActive_idx" ON "OutstationRoute" ("isActive");

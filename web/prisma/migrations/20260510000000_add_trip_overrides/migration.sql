@@ -1,4 +1,4 @@
-CREATE TABLE "TripOverride" (
+CREATE TABLE IF NOT EXISTS "TripOverride" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "fromCity" TEXT NOT NULL,
   "toCity" TEXT NOT NULL,
@@ -16,6 +16,6 @@ CREATE TABLE "TripOverride" (
   CONSTRAINT "TripOverride_milesXlMarkupType_check" CHECK ("milesXlMarkupType" IN ('percentage', 'flat'))
 );
 
-CREATE INDEX "TripOverride_normalizedFromCity_idx" ON "TripOverride" ("normalizedFromCity");
-CREATE INDEX "TripOverride_normalizedToCity_idx" ON "TripOverride" ("normalizedToCity");
-CREATE INDEX "TripOverride_active_idx" ON "TripOverride" ("active");
+CREATE INDEX IF NOT EXISTS "TripOverride_normalizedFromCity_idx" ON "TripOverride" ("normalizedFromCity");
+CREATE INDEX IF NOT EXISTS "TripOverride_normalizedToCity_idx" ON "TripOverride" ("normalizedToCity");
+CREATE INDEX IF NOT EXISTS "TripOverride_active_idx" ON "TripOverride" ("active");
