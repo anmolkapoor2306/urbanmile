@@ -9,6 +9,7 @@ import {
   Car,
   LayoutDashboard,
   LogOut,
+  MapPin,
   Menu,
   Moon,
   Route,
@@ -26,6 +27,7 @@ import { canAccessPage, PAGE_PERMISSIONS } from '@/lib/authPermissions';
 export type DashboardPage =
   | 'dashboard'
   | 'dispatch'
+  | 'service-control'
   | 'bookings'
   | 'drivers'
   | 'fleet'
@@ -45,10 +47,11 @@ const navItems: Array<{
   label: string;
   href: string;
   icon: typeof LayoutDashboard;
-  requiredPerm: 'dispatch' | 'bookings' | 'drivers' | 'fleet' | 'outstation-pricing' | 'customers' | 'finance' | 'reports' | 'settings' | 'dashboard';
+  requiredPerm: keyof typeof PAGE_PERMISSIONS;
 }> = [
   { key: 'dashboard', label: 'Dashboard', href: '/admin', icon: LayoutDashboard, requiredPerm: 'dashboard' },
   { key: 'dispatch', label: 'Dispatch', href: '/admin/dispatch', icon: Route, requiredPerm: 'dispatch' },
+  { key: 'service-control', label: 'Service Control', href: '/admin/dispatch/operations', icon: MapPin, requiredPerm: 'service-control' },
   { key: 'bookings', label: 'Bookings', href: '/admin/bookings', icon: CalendarCheck, requiredPerm: 'bookings' },
   { key: 'drivers', label: 'Drivers', href: '/admin/drivers', icon: Users, requiredPerm: 'drivers' },
   { key: 'fleet', label: 'Fleet', href: '/admin/fleet', icon: Car, requiredPerm: 'fleet' },
@@ -154,16 +157,16 @@ export function DashboardHeader({ currentPage, adminRole = 'VIEWER' }: Dashboard
         onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-[260px] shrink-0 transition-[width,transform] duration-300 ease-out lg:relative lg:z-40 lg:translate-x-0 lg:overflow-visible',
+          'fixed inset-y-0 left-0 z-50 w-[260px] shrink-0 transition-[width,transform] duration-300 ease-out lg:relative lg:z-20 lg:translate-x-0 lg:overflow-hidden',
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-          isPinnedOpen ? 'lg:w-[260px]' : 'lg:w-[72px]'
+          isExpanded ? 'lg:w-[260px]' : 'lg:w-[72px]'
         )}
       >
         <div
           className={cn(
             'flex h-full w-[260px] min-w-0 flex-col overflow-x-hidden border-r border-zinc-200 bg-white transition-[width,box-shadow] duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-950',
             isExpanded ? 'lg:w-[260px]' : 'lg:w-[72px] lg:min-w-[72px]',
-            !isPinnedOpen && isHoverOpen && 'lg:absolute lg:inset-y-0 lg:left-0 lg:shadow-xl'
+            !isPinnedOpen && isHoverOpen && 'lg:shadow-xl'
           )}
         >
         <div className={cn('flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 dark:border-zinc-800', isExpanded ? 'lg:justify-between' : 'lg:justify-center')}>

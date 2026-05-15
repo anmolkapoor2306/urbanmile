@@ -21,13 +21,18 @@ import { useBookingLocationField } from '@/hooks/useBookingLocationField';
 import type { BookingLocationMetadata } from '@/lib/bookingLocation';
 import { cleanGeoapifyCityLocation } from '@/lib/locationFormatting';
 import {
-  calculateTripOverrideMilesXlPrice,
+  DEFAULT_PRICING_ENGINE_CONFIG,
+  PricingEngineError,
+  calculateFare,
+  type PricingEngineConfig,
+  type PricingVehicleType,
+} from '@/lib/pricingEngine';
+import {
   createTripOverrideId,
   extractCityFromAddressOrText,
-  formatTripOverrideMilesXlMarkup,
   formatTripOverrideCityName,
   getTripOverridePrice,
-  getTripOverrideSedanPrice,
+  getTripOverrideVehiclePrice,
   matchTripOverride,
   normalizeCityName,
   sanitizeTripOverrideDraft,
@@ -37,16 +42,14 @@ import {
   type TripOverrideDraft,
 } from '@/lib/tripOverrides';
 
-type VehicleType = 'Sedan' | 'SUV';
-type RouteType = 'One Way' | 'Round Trip' | 'Local';
-type MarginMode = 'percentage' | 'flat';
+type VehicleType = 'Sedan' | 'SUV' | 'Premium';
+type RouteType = 'One Way' | 'Round Trip';
 type NumericInputValue = string;
-type PricingFlashCard = 'toll-charges' | 'constant-cost' | 'trip-override';
+type PricingFlashCard = 'toll-charges' | 'constant-cost' | 'fuel-economy' | 'trip-override';
 
 type PricingInputs = {
   vehicleType: VehicleType;
   routeType: RouteType;
-  nightCharge: boolean;
   fuelPricePerLiter: NumericInputValue;
   driverMonthlySalary: NumericInputValue;
   carEmiMonthly: NumericInputValue;
@@ -54,16 +57,20 @@ type PricingInputs = {
   taxiPermitAnnual: NumericInputValue;
   insuranceAnnual: NumericInputValue;
   tollCost: NumericInputValue;
+  roundTripTollCost: NumericInputValue;
   platformCharges: NumericInputValue;
-  nightChargeAmount: NumericInputValue;
-  marginMode: MarginMode;
   profitMargin: NumericInputValue;
-  surgeMultiplier: NumericInputValue;
+  monthlyOperationalKm: NumericInputValue;
+  annualOperationalKm: NumericInputValue;
 };
 type ConstantCostInputs = Pick<
   PricingInputs,
   'fuelPricePerLiter' | 'maintenanceCostPerKm' | 'platformCharges' | 'profitMargin'
 >;
+type FuelEconomyInputs = Record<VehicleType, NumericInputValue>;
+type PricingConfigPayload = Partial<Omit<PricingEngineConfig, 'fuelEconomyKmpl'>> & {
+  fuelEconomyKmpl?: Partial<Record<PricingVehicleType, number>>;
+};
 
 type PricingResult = {
   fuelCost: number;
@@ -75,10 +82,8 @@ type PricingResult = {
   tollCost: number;
   platformCharges: number;
   totalOperatingCost: number;
-  routeAdjustment: number;
-  nightAdjustment: number;
-  finalProfitAmount: number;
-  totalTripPrice: number;
+  profitAmount: number;
+  finalFare: number;
 };
 type LocationFieldName = 'pickup' | 'dropoff';
 type AddressSuggestion = {
@@ -133,8 +138,6 @@ type ValidRouteEstimate = RouteEstimate & {
   durationMinutes: number;
 };
 
-const CONSTANT_COST_STORAGE_KEY = 'urbanmiles-pricing-engine-constant-costs';
-const TRIP_OVERRIDE_STORAGE_KEY = 'urbanmiles-pricing-engine-trip-overrides';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 const CITY_RESULT_TYPES = new Set(['city', 'county', 'state', 'postcode', 'district', 'suburb', 'locality']);
 const DEFAULT_PIN_LOCATION = {
@@ -153,7 +156,6 @@ const PIN_CITY_CENTERS: Record<string, { latitude: number; longitude: number; la
 const initialInputs: PricingInputs = {
   vehicleType: 'Sedan',
   routeType: 'One Way',
-  nightCharge: false,
   fuelPricePerLiter: '',
   driverMonthlySalary: '28000',
   carEmiMonthly: '22000',
@@ -161,11 +163,11 @@ const initialInputs: PricingInputs = {
   taxiPermitAnnual: '25000',
   insuranceAnnual: '32000',
   tollCost: '250',
+  roundTripTollCost: '',
   platformCharges: '',
-  nightChargeAmount: '0',
-  marginMode: 'percentage',
   profitMargin: '18',
-  surgeMultiplier: '1',
+  monthlyOperationalKm: '6000',
+  annualOperationalKm: '72000',
 };
 const initialConstantCosts: ConstantCostInputs = {
   fuelPricePerLiter: initialInputs.fuelPricePerLiter,
@@ -176,22 +178,16 @@ const initialConstantCosts: ConstantCostInputs = {
 const initialTripOverrideDraft: TripOverrideDraft = {
   fromCity: '',
   toCity: '',
-  fixedPrice: '',
-  milesXlMarkupType: 'percentage',
-  milesXlMarkupValue: '0',
-  includeReverse: true,
+  sedanPrice: '',
+  suvPrice: '',
+  premiumPrice: '',
+  reverseRouteEnabled: true,
   isActive: true,
 };
-
-const vehicleEfficiencyKmPerLiter: Record<VehicleType, number> = {
-  Sedan: 16,
-  SUV: 12,
-};
-
-const routeMultipliers: Record<RouteType, number> = {
-  'One Way': 1,
-  'Round Trip': 1.75,
-  Local: 0.9,
+const initialFuelEconomy: FuelEconomyInputs = {
+  Sedan: '16',
+  SUV: '12',
+  Premium: '10',
 };
 
 const inputClassName =
@@ -208,6 +204,10 @@ export function PricingEngineClient() {
   const [activeFlashCard, setActiveFlashCard] = useState<PricingFlashCard | null>(null);
   const [constantCosts, setConstantCosts] = useState<ConstantCostInputs>(initialConstantCosts);
   const [constantCostDraft, setConstantCostDraft] = useState<ConstantCostInputs>(initialConstantCosts);
+  const [fuelEconomy, setFuelEconomy] = useState<FuelEconomyInputs>(initialFuelEconomy);
+  const [fuelEconomyDraft, setFuelEconomyDraft] = useState<FuelEconomyInputs>(initialFuelEconomy);
+  const [pricingConfigStatus, setPricingConfigStatus] = useState('');
+  const [isPricingConfigSaving, setIsPricingConfigSaving] = useState(false);
   const [tripOverrides, setTripOverrides] = useState<TripOverride[]>([]);
   const [tripOverrideDraft, setTripOverrideDraft] = useState<TripOverrideDraft>(initialTripOverrideDraft);
   const [editingTripOverrideId, setEditingTripOverrideId] = useState<string | null>(null);
@@ -231,16 +231,17 @@ export function PricingEngineClient() {
     error: null,
   });
   const pricing = useMemo(
-    () => (hasValidRouteEstimate(routeEstimate) ? calculatePricing(inputs, routeEstimate) : null),
-    [inputs, routeEstimate]
+    () => (hasValidRouteEstimate(routeEstimate) ? calculatePricing(inputs, fuelEconomy, routeEstimate) : null),
+    [fuelEconomy, inputs, routeEstimate]
   );
   const activeTripOverrideMatch = useMemo(
     () => matchTripOverride(tripOverrides, pickupField.address, dropoffField.address),
     [dropoffField.address, pickupField.address, tripOverrides]
   );
-  const finalTripPrice = activeTripOverrideMatch
-    ? getTripOverrideSedanPrice(activeTripOverrideMatch.override)
-    : pricing?.totalTripPrice ?? null;
+  const activeOverrideFare = activeTripOverrideMatch
+    ? getTripOverrideVehiclePrice(activeTripOverrideMatch.override, toPricingVehicleType(inputs.vehicleType))
+    : null;
+  const finalTripPrice = activeOverrideFare ?? pricing?.finalFare ?? null;
   const activeLocationValue =
     activeLocationField === 'pickup'
       ? pickupField.address
@@ -249,6 +250,38 @@ export function PricingEngineClient() {
         : '';
   const activeSuggestions = activeLocationField ? locationSuggestions[activeLocationField] : [];
 
+  function applyPricingConfig(config: PricingEngineConfig) {
+    const nextConstantCosts: ConstantCostInputs = {
+      fuelPricePerLiter: formatInputNumber(config.fuelPricePerLiter),
+      maintenanceCostPerKm: formatInputNumber(config.maintenanceCostPerKm),
+      platformCharges: formatInputNumber(config.platformCharges),
+      profitMargin: formatInputNumber(config.profitMarginPercent),
+    };
+    const nextFuelEconomy: FuelEconomyInputs = {
+      Sedan: formatInputNumber(config.fuelEconomyKmpl.SEDAN),
+      SUV: formatInputNumber(config.fuelEconomyKmpl.SUV),
+      Premium: formatInputNumber(config.fuelEconomyKmpl.PREMIUM),
+    };
+
+    setConstantCosts(nextConstantCosts);
+    setConstantCostDraft(nextConstantCosts);
+    setFuelEconomy(nextFuelEconomy);
+    setFuelEconomyDraft(nextFuelEconomy);
+    setInputs((current) => ({
+      ...current,
+      ...nextConstantCosts,
+      driverMonthlySalary: formatInputNumber(config.driverMonthlySalary),
+      carEmiMonthly: formatInputNumber(config.carMonthlyEmi),
+      taxiPermitAnnual: formatInputNumber(config.annualPermitCost),
+      insuranceAnnual: formatInputNumber(config.annualInsuranceCost),
+      tollCost: formatInputNumber(config.defaultOneWayTollCost),
+      roundTripTollCost:
+        config.defaultRoundTripTollCost === null ? '' : formatInputNumber(config.defaultRoundTripTollCost),
+      monthlyOperationalKm: formatInputNumber(config.monthlyOperationalKm),
+      annualOperationalKm: formatInputNumber(config.annualOperationalKm),
+    }));
+  }
+
   function updateInput<Key extends keyof PricingInputs>(key: Key, value: PricingInputs[Key]) {
     setInputs((current) => ({ ...current, [key]: value }));
   }
@@ -256,6 +289,11 @@ export function PricingEngineClient() {
   function openConstantCostModal() {
     setConstantCostDraft(constantCosts);
     setActiveFlashCard('constant-cost');
+  }
+
+  function openFuelEconomyModal() {
+    setFuelEconomyDraft(fuelEconomy);
+    setActiveFlashCard('fuel-economy');
   }
 
   function openTripOverrideModal() {
@@ -278,12 +316,79 @@ export function PricingEngineClient() {
     setConstantCostDraft((current) => ({ ...current, [key]: value }));
   }
 
-  function saveConstantCosts() {
+  function updateFuelEconomyDraft<Key extends keyof FuelEconomyInputs>(
+    key: Key,
+    value: FuelEconomyInputs[Key]
+  ) {
+    setFuelEconomyDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveConstantCosts() {
     const nextConstantCosts = sanitizeConstantCostInputs(constantCostDraft);
-    setConstantCosts(nextConstantCosts);
-    setInputs((current) => ({ ...current, ...nextConstantCosts }));
-    window.localStorage.setItem(CONSTANT_COST_STORAGE_KEY, JSON.stringify(nextConstantCosts));
-    closeFlashCard();
+    await savePricingConfigToServer({
+      fuelPricePerLiter: safeNumber(nextConstantCosts.fuelPricePerLiter),
+      maintenanceCostPerKm: safeNumber(nextConstantCosts.maintenanceCostPerKm),
+      platformCharges: safeNumber(nextConstantCosts.platformCharges),
+      profitMarginPercent: safeNumber(nextConstantCosts.profitMargin),
+    });
+  }
+
+  async function saveFuelEconomy() {
+    await savePricingConfigToServer({
+      fuelEconomyKmpl: {
+        SEDAN: safeNumber(fuelEconomyDraft.Sedan),
+        SUV: safeNumber(fuelEconomyDraft.SUV),
+        PREMIUM: safeNumber(fuelEconomyDraft.Premium),
+      },
+    });
+  }
+
+  async function saveTollCharges() {
+    await savePricingConfigToServer({
+      defaultOneWayTollCost: safeNumber(inputs.tollCost),
+      defaultRoundTripTollCost: inputs.roundTripTollCost.trim()
+        ? safeNumber(inputs.roundTripTollCost)
+        : null,
+    });
+  }
+
+  async function saveCostAssumptions() {
+    await savePricingConfigToServer({
+      driverMonthlySalary: safeNumber(inputs.driverMonthlySalary),
+      carMonthlyEmi: safeNumber(inputs.carEmiMonthly),
+      annualPermitCost: safeNumber(inputs.taxiPermitAnnual),
+      annualInsuranceCost: safeNumber(inputs.insuranceAnnual),
+      monthlyOperationalKm: safeNumber(inputs.monthlyOperationalKm),
+      annualOperationalKm: safeNumber(inputs.annualOperationalKm),
+    });
+  }
+
+  async function savePricingConfigToServer(payload: PricingConfigPayload) {
+    setIsPricingConfigSaving(true);
+    setPricingConfigStatus('');
+
+    try {
+      const response = await fetch('/api/admin/pricing-config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      });
+      const data = (await response.json()) as { data?: PricingEngineConfig; error?: string };
+
+      if (!response.ok || !data.data) {
+        throw new Error(data.error ?? 'Could not save pricing configuration.');
+      }
+
+      applyPricingConfig(data.data);
+      setPricingConfigStatus('Pricing configuration saved.');
+      closeFlashCard();
+    } catch (error) {
+      console.error('[Pricing Engine UI] config save failed', error);
+      setPricingConfigStatus('Could not save pricing configuration. Please try again.');
+    } finally {
+      setIsPricingConfigSaving(false);
+    }
   }
 
   function startAddTripOverride() {
@@ -296,10 +401,10 @@ export function PricingEngineClient() {
     setTripOverrideDraft({
       fromCity: override.fromCity,
       toCity: override.toCity,
-      fixedPrice: override.fixedPrice,
-      milesXlMarkupType: override.milesXlMarkupType,
-      milesXlMarkupValue: override.milesXlMarkupValue,
-      includeReverse: override.includeReverse,
+      sedanPrice: override.sedanPrice,
+      suvPrice: override.suvPrice,
+      premiumPrice: override.premiumPrice,
+      reverseRouteEnabled: override.reverseRouteEnabled,
       isActive: override.isActive,
     });
     setEditingTripOverrideId(override.id);
@@ -321,7 +426,7 @@ export function PricingEngineClient() {
 
   async function saveTripOverride() {
     const nextDraft = sanitizeTripOverrideDraft(tripOverrideDraft);
-    const fixedPrice = getTripOverridePrice(nextDraft.fixedPrice);
+    const fixedPrice = getTripOverridePrice(nextDraft.sedanPrice);
 
     if (!normalizeCityName(nextDraft.fromCity) || !normalizeCityName(nextDraft.toCity) || fixedPrice <= 0) {
       setTripOverrideError('Enter from city, to city, and a Sedan Price above 0.');
@@ -358,7 +463,6 @@ export function PricingEngineClient() {
     try {
       const savedOverrides = await saveTripOverridesToServer(nextOverrides);
       setTripOverrides(savedOverrides);
-      window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
       cancelTripOverrideForm();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -399,7 +503,6 @@ export function PricingEngineClient() {
       const savedOverrides = await saveTripOverridesToServer(nextOverrides);
       setTripOverrideError('');
       setTripOverrides(savedOverrides);
-      window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[Trip Override UI] update failed', error);
@@ -411,26 +514,54 @@ export function PricingEngineClient() {
     }
   }
 
-  useEffect(() => {
+  async function deleteTripOverride(id: string) {
     try {
-      const storedConstantCosts = window.localStorage.getItem(CONSTANT_COST_STORAGE_KEY);
-
-      if (!storedConstantCosts) {
-        return;
+      const savedOverrides = await saveTripOverridesToServer(
+        tripOverrides.filter((override) => override.id !== id)
+      );
+      setTripOverrides(savedOverrides);
+      setTripOverrideError('');
+      if (editingTripOverrideId === id) {
+        cancelTripOverrideForm();
       }
-
-      const parsedConstantCosts = JSON.parse(storedConstantCosts) as Partial<ConstantCostInputs>;
-      const nextConstantCosts = sanitizeConstantCostInputs({
-        ...initialConstantCosts,
-        ...parsedConstantCosts,
-      });
-      setConstantCosts(nextConstantCosts);
-      setInputs((current) => ({ ...current, ...nextConstantCosts }));
-      setConstantCostDraft(nextConstantCosts);
-    } catch {
-      setConstantCosts(initialConstantCosts);
-      setConstantCostDraft(initialConstantCosts);
+    } catch (error) {
+      console.error('[Trip Override UI] delete failed', error);
+      setTripOverrideError('Could not delete trip override. Please try again.');
     }
+  }
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadPricingConfig() {
+      try {
+        const response = await fetch('/api/admin/pricing-config', {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        const data = (await response.json()) as { data?: PricingEngineConfig; error?: string };
+
+        if (!response.ok || !data.data) {
+          throw new Error(data.error ?? 'Could not load pricing configuration.');
+        }
+
+        if (!isCancelled) {
+          applyPricingConfig(data.data);
+        }
+      } catch (error) {
+        console.error('[Pricing Engine UI] config load failed', error);
+        if (!isCancelled) {
+          setPricingConfigStatus('Using default pricing configuration.');
+          applyPricingConfig(DEFAULT_PRICING_ENGINE_CONFIG);
+        }
+      }
+    }
+
+    loadPricingConfig();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -438,20 +569,14 @@ export function PricingEngineClient() {
 
     async function loadTripOverrides() {
       try {
-        let nextOverrides = await loadTripOverridesFromServer();
-        const storedTripOverrides = readStoredTripOverrides();
-
-        if (nextOverrides.length === 0 && storedTripOverrides.length > 0) {
-          nextOverrides = await saveTripOverridesToServer(storedTripOverrides);
-          window.localStorage.removeItem(TRIP_OVERRIDE_STORAGE_KEY);
-        }
+        const nextOverrides = await loadTripOverridesFromServer();
 
         if (!isCancelled) {
           setTripOverrides(nextOverrides);
         }
       } catch {
         if (!isCancelled) {
-          setTripOverrides(readStoredTripOverrides());
+          setTripOverrides([]);
         }
       }
     }
@@ -653,6 +778,9 @@ export function PricingEngineClient() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end">
+          <PricingHeaderButton onClick={openFuelEconomyModal}>
+            Fuel Economy
+          </PricingHeaderButton>
           <PricingHeaderButton onClick={() => setActiveFlashCard('toll-charges')}>
             Toll Charges
           </PricingHeaderButton>
@@ -670,7 +798,7 @@ export function PricingEngineClient() {
           onClose={closeFlashCard}
           size={activeFlashCard === 'trip-override' ? 'wide' : 'default'}
           footer={
-            activeFlashCard === 'constant-cost' ? (
+            activeFlashCard === 'constant-cost' || activeFlashCard === 'fuel-economy' || activeFlashCard === 'toll-charges' ? (
               <div className="flex flex-col-reverse gap-2 border-t border-zinc-800 px-5 py-4 sm:flex-row sm:justify-end">
                 <button
                   type="button"
@@ -681,10 +809,17 @@ export function PricingEngineClient() {
                 </button>
                 <button
                   type="button"
-                  onClick={saveConstantCosts}
+                  onClick={
+                    activeFlashCard === 'constant-cost'
+                      ? saveConstantCosts
+                      : activeFlashCard === 'fuel-economy'
+                        ? saveFuelEconomy
+                        : saveTollCharges
+                  }
+                  disabled={isPricingConfigSaving}
                   className="min-h-10 rounded-xl bg-amber-400 px-4 text-sm font-black text-zinc-950 transition-colors hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-zinc-950"
                 >
-                  Save Changes
+                  {isPricingConfigSaving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             ) : null
@@ -721,6 +856,49 @@ export function PricingEngineClient() {
               />
             </div>
           ) : null}
+          {activeFlashCard === 'fuel-economy' ? (
+            <div className="grid gap-4">
+              <NumberField
+                label="Sedan km/L"
+                value={fuelEconomyDraft.Sedan}
+                suffix="km/L"
+                onChange={(value) => updateFuelEconomyDraft('Sedan', value)}
+              />
+              <NumberField
+                label="SUV km/L"
+                value={fuelEconomyDraft.SUV}
+                suffix="km/L"
+                onChange={(value) => updateFuelEconomyDraft('SUV', value)}
+              />
+              <NumberField
+                label="Premium km/L"
+                value={fuelEconomyDraft.Premium}
+                suffix="km/L"
+                onChange={(value) => updateFuelEconomyDraft('Premium', value)}
+              />
+            </div>
+          ) : null}
+          {activeFlashCard === 'toll-charges' ? (
+            <div className="grid gap-4">
+              <NumberField
+                label="One-way Toll Cost"
+                value={inputs.tollCost}
+                prefix="₹"
+                suffix="/ trip"
+                onChange={(value) => updateInput('tollCost', value)}
+              />
+              <NumberField
+                label="Round-trip Toll Override"
+                value={inputs.roundTripTollCost}
+                prefix="₹"
+                suffix="/ trip"
+                onChange={(value) => updateInput('roundTripTollCost', value)}
+              />
+              <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-bold leading-6 text-amber-100">
+                Leave round-trip toll empty to use two times the one-way toll.
+              </div>
+            </div>
+          ) : null}
           {activeFlashCard === 'trip-override' ? (
             <TripOverrideModalContent
               overrides={tripOverrides}
@@ -730,12 +908,18 @@ export function PricingEngineClient() {
               onAdd={startAddTripOverride}
               onEdit={startEditTripOverride}
               onToggleActive={toggleTripOverrideActive}
+              onDelete={deleteTripOverride}
               onDraftChange={updateTripOverrideDraft}
               onSave={saveTripOverride}
               onCancel={cancelTripOverrideForm}
             />
           ) : null}
         </PricingFlashCardModal>
+      ) : null}
+      {pricingConfigStatus ? (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-bold text-amber-100">
+          {pricingConfigStatus}
+        </div>
       ) : null}
 
       <div className="grid min-h-0 gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(380px,0.92fr)]">
@@ -745,13 +929,13 @@ export function PricingEngineClient() {
               <SelectField
                 label="Vehicle Type"
                 value={inputs.vehicleType}
-                options={['Sedan', 'SUV']}
+                options={['Sedan', 'SUV', 'Premium']}
                 onChange={(value) => updateInput('vehicleType', value as VehicleType)}
               />
               <SelectField
                 label="Route Type"
                 value={inputs.routeType}
-                options={['One Way', 'Round Trip', 'Local']}
+                options={['One Way', 'Round Trip']}
                 onChange={(value) => updateInput('routeType', value as RouteType)}
               />
               <PricingLocationField
@@ -857,28 +1041,62 @@ export function PricingEngineClient() {
                 onChange={(value) => updateInput('insuranceAnnual', value)}
               />
               <NumberField
-                label="Toll Cost"
+                label="One-way Toll Cost"
                 value={inputs.tollCost}
                 prefix="₹"
                 suffix="/ trip"
                 onChange={(value) => updateInput('tollCost', value)}
               />
-              <NightChargeField
-                amount={inputs.nightChargeAmount}
-                enabled={inputs.nightCharge}
-                onAmountChange={(value) => updateInput('nightChargeAmount', value)}
-                onEnabledChange={(value) => updateInput('nightCharge', value)}
+              <NumberField
+                label="Round-trip Toll Override"
+                value={inputs.roundTripTollCost}
+                prefix="₹"
+                suffix="/ trip"
+                onChange={(value) => updateInput('roundTripTollCost', value)}
               />
+            </div>
+
+            <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-zinc-100">Cost Allocation Assumptions</h3>
+                  <p className="mt-1 text-sm font-semibold text-zinc-500">
+                    Fixed costs are allocated by monthly and annual operational kilometers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={saveCostAssumptions}
+                  disabled={isPricingConfigSaving}
+                  className="min-h-10 rounded-xl border border-amber-400/50 px-4 text-sm font-black text-amber-300 transition-colors hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isPricingConfigSaving ? 'Saving...' : 'Save Assumptions'}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <NumberField
+                  label="Monthly Operational KM"
+                  value={inputs.monthlyOperationalKm}
+                  suffix="km"
+                  onChange={(value) => updateInput('monthlyOperationalKm', value)}
+                />
+                <NumberField
+                  label="Annual Operational KM"
+                  value={inputs.annualOperationalKm}
+                  suffix="km"
+                  onChange={(value) => updateInput('annualOperationalKm', value)}
+                />
+              </div>
             </div>
 
             <div className="mt-5 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
               <p className="text-sm font-bold leading-6 text-amber-100">
-                All operational costs are converted into trip-based pricing using route distance and fixed operational assumptions.
+                Fare = total operating cost + profit margin. Round trips use double trip distance and either a round-trip toll override or two one-way tolls.
               </p>
               <ul className="mt-3 space-y-1.5 text-sm font-medium text-zinc-300">
-                <li>Distance-based maintenance calculation</li>
-                <li>Monthly and annual operational allocation</li>
-                <li>Route and toll based pricing adjustments</li>
+                <li>Monthly operational km default: 6,000 km</li>
+                <li>Annual operational km default: 72,000 km</li>
+                <li>Fuel, maintenance, driver, EMI, permit, insurance, toll, and platform costs are included.</li>
               </ul>
             </div>
           </PricingCard>
@@ -894,56 +1112,32 @@ export function PricingEngineClient() {
               <PricingRow icon={Route} label="Permit Cost" amount={pricing?.permitCost} />
               <PricingRow icon={ShieldCheck} label="Insurance Cost" amount={pricing?.insuranceCost} />
               <PricingRow icon={Wallet} label="Toll Cost" amount={pricing?.tollCost} />
-              {inputs.nightCharge ? (
-                <PricingRow icon={Wallet} label="Night Charge" amount={pricing?.nightAdjustment} />
-              ) : null}
               <PricingRow icon={Calculator} label="Platform Charges" amount={pricing?.platformCharges} />
             </div>
             <div className="my-4 h-px bg-zinc-800" />
             <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-400 bg-zinc-950 px-4 py-3">
-              <span className="text-sm font-black text-zinc-100">Total Operating Cost (Per Trip)</span>
+              <span className="text-sm font-black text-zinc-100">Total Operating Cost</span>
               <span className="text-xl font-black text-amber-300">
                 {pricing ? formatInr(pricing.totalOperatingCost) : '—'}
               </span>
             </div>
           </PricingCard>
 
-          <PricingCard title="Profit Margin">
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-1">
-              <MarginModeButton
-                active={inputs.marginMode === 'percentage'}
-                onClick={() => updateInput('marginMode', 'percentage')}
-              >
-                Percentage (%)
-              </MarginModeButton>
-              <MarginModeButton
-                active={inputs.marginMode === 'flat'}
-                onClick={() => updateInput('marginMode', 'flat')}
-              >
-                Flat Amount (₹)
-              </MarginModeButton>
-            </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <PricingCard title="Profit">
+            <div className="grid gap-4 sm:grid-cols-2">
               <NumberField
                 label="Profit Margin"
                 value={inputs.profitMargin}
-                prefix={inputs.marginMode === 'flat' ? '₹' : undefined}
-                suffix={inputs.marginMode === 'percentage' ? '%' : undefined}
+                suffix="%"
                 onChange={(value) => updateInput('profitMargin', value)}
               />
-              <NumberField
-                label="Surge Multiplier"
-                value={inputs.surgeMultiplier}
-                suffix="x"
-                onChange={(value) => updateInput('surgeMultiplier', value)}
-              />
-              <ReadOnlyAmount label="Final Profit Amount" value={pricing?.finalProfitAmount} />
+              <ReadOnlyAmount label="Profit Amount" value={pricing?.profitAmount} />
             </div>
           </PricingCard>
 
           <section className="rounded-xl border border-amber-400 bg-zinc-950 p-6">
             <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-400">
-              Total Trip Price
+              Final Customer Fare
             </p>
             <div
               className={cn(
@@ -954,13 +1148,11 @@ export function PricingEngineClient() {
               {typeof finalTripPrice === 'number' ? formatInr(finalTripPrice) : 'Select route to calculate price'}
             </div>
             <p className="mt-3 text-sm font-medium text-zinc-400">
-              {activeTripOverrideMatch
-                ? `Sedan override price for ${activeTripOverrideMatch.override.fromCity} ${
-                    activeTripOverrideMatch.override.includeReverse ? '<->' : '->'
-                  } ${activeTripOverrideMatch.override.toCity}`
-                : 'Operating cost + margin + route adjustments'}
+              {activeOverrideFare !== null
+                ? 'Trip Override Applied'
+                : 'Total operating cost + profit margin using the shared pricing engine.'}
             </p>
-            {activeTripOverrideMatch ? (
+            {activeOverrideFare !== null ? (
               <div className="mt-4 inline-flex rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-amber-300">
                 Trip Override Applied
               </div>
@@ -976,55 +1168,59 @@ export function PricingEngineClient() {
   );
 }
 
-function calculatePricing(inputs: PricingInputs, routeEstimate: ValidRouteEstimate): PricingResult {
-  const distanceKm = Math.max(0, safeNumber(routeEstimate.distanceKm));
-  const fuelPricePerLiter = Math.max(0, safeNumber(inputs.fuelPricePerLiter));
-  const driverMonthlySalary = Math.max(0, safeNumber(inputs.driverMonthlySalary));
-  const carEmiMonthly = Math.max(0, safeNumber(inputs.carEmiMonthly));
-  const maintenanceCostPerKm = Math.max(0, safeNumber(inputs.maintenanceCostPerKm));
-  const taxiPermitAnnual = Math.max(0, safeNumber(inputs.taxiPermitAnnual));
-  const insuranceAnnual = Math.max(0, safeNumber(inputs.insuranceAnnual));
-  const tollCost = Math.max(0, safeNumber(inputs.tollCost));
-  const inputPlatformCharges = inputs.platformCharges;
-  const platformCharges = Math.max(0, safeNumber(inputPlatformCharges));
-  const nightAdjustment = inputs.nightCharge ? Math.max(0, safeNumber(inputs.nightChargeAmount)) : 0;
-  const profitMargin = Math.max(0, safeNumber(inputs.profitMargin));
-  const surgeMultiplier = Math.max(0, safeNumber(inputs.surgeMultiplier));
-  const fuelEfficiency = Math.max(1, safeNumber(vehicleEfficiencyKmPerLiter[inputs.vehicleType]));
-  const routeMultiplier = Math.max(0, safeNumber(routeMultipliers[inputs.routeType], 1));
+function calculatePricing(
+  inputs: PricingInputs,
+  fuelEconomy: FuelEconomyInputs,
+  routeEstimate: ValidRouteEstimate
+): PricingResult | null {
+  try {
+    const fare = calculateFare({
+      vehicleType: toPricingVehicleType(inputs.vehicleType),
+      routeType: inputs.routeType === 'Round Trip' ? 'ROUND_TRIP' : 'ONE_WAY',
+      distanceKm: routeEstimate.distanceKm,
+      tollCost: safeNumber(inputs.tollCost),
+      roundTripTollCost: inputs.roundTripTollCost.trim() ? safeNumber(inputs.roundTripTollCost) : null,
+      config: {
+        fuelPricePerLiter: safeNumber(inputs.fuelPricePerLiter),
+        maintenanceCostPerKm: safeNumber(inputs.maintenanceCostPerKm),
+        platformCharges: safeNumber(inputs.platformCharges),
+        profitMarginPercent: safeNumber(inputs.profitMargin),
+        driverMonthlySalary: safeNumber(inputs.driverMonthlySalary),
+        carMonthlyEmi: safeNumber(inputs.carEmiMonthly),
+        annualPermitCost: safeNumber(inputs.taxiPermitAnnual),
+        annualInsuranceCost: safeNumber(inputs.insuranceAnnual),
+        monthlyOperationalKm: safeNumber(inputs.monthlyOperationalKm),
+        annualOperationalKm: safeNumber(inputs.annualOperationalKm),
+        defaultOneWayTollCost: safeNumber(inputs.tollCost),
+        defaultRoundTripTollCost: inputs.roundTripTollCost.trim() ? safeNumber(inputs.roundTripTollCost) : null,
+        fuelEconomyKmpl: {
+          SEDAN: safeNumber(fuelEconomy.Sedan),
+          SUV: safeNumber(fuelEconomy.SUV),
+          PREMIUM: safeNumber(fuelEconomy.Premium),
+        },
+      },
+    });
 
-  const fuelCost = (distanceKm / fuelEfficiency) * fuelPricePerLiter;
-  const maintenanceCost = distanceKm * maintenanceCostPerKm;
-  const driverCost = driverMonthlySalary / 30;
-  const emiCost = carEmiMonthly / 30;
-  const permitCost = taxiPermitAnnual / 365;
-  const insuranceCost = insuranceAnnual / 365;
-  const baseSubtotal = fuelCost + maintenanceCost + driverCost + emiCost + permitCost + insuranceCost + tollCost;
-  const operatingCostWithPlatformCharges = baseSubtotal + platformCharges;
-  const totalOperatingCost = operatingCostWithPlatformCharges + nightAdjustment;
-  const routeAdjustedOperatingCost = operatingCostWithPlatformCharges * routeMultiplier;
-  const routeAdjustment = routeAdjustedOperatingCost - operatingCostWithPlatformCharges;
-  const rawProfit =
-    inputs.marginMode === 'percentage'
-      ? routeAdjustedOperatingCost * (profitMargin / 100)
-      : profitMargin;
-  const finalProfitAmount = rawProfit * surgeMultiplier;
+    return {
+      fuelCost: fare.fuelCost,
+      maintenanceCost: fare.maintenanceCost,
+      driverCost: fare.driverCost,
+      emiCost: fare.emiCost,
+      permitCost: fare.permitCost,
+      insuranceCost: fare.insuranceCost,
+      tollCost: fare.tollCost,
+      platformCharges: fare.platformCharges,
+      totalOperatingCost: fare.totalOperatingCost,
+      profitAmount: fare.profitAmount,
+      finalFare: fare.finalFare,
+    };
+  } catch (error) {
+    if (!(error instanceof PricingEngineError)) {
+      console.error('[Pricing Engine UI] calculation failed', error);
+    }
 
-  return {
-    fuelCost,
-    maintenanceCost,
-    driverCost,
-    emiCost,
-    permitCost,
-    insuranceCost,
-    tollCost,
-    platformCharges,
-    totalOperatingCost,
-    routeAdjustment,
-    nightAdjustment,
-    finalProfitAmount,
-    totalTripPrice: routeAdjustedOperatingCost + finalProfitAmount + nightAdjustment,
-  };
+    return null;
+  }
 }
 
 function PricingCard({ title, children }: { title: string; children: ReactNode }) {
@@ -1055,6 +1251,10 @@ function getPricingFlashCardTitle(card: PricingFlashCard) {
 
   if (card === 'trip-override') {
     return 'Trip Override';
+  }
+
+  if (card === 'fuel-economy') {
+    return 'Fuel Economy';
   }
 
   return 'Constant Cost';
@@ -1124,6 +1324,7 @@ function TripOverrideModalContent({
   onAdd,
   onEdit,
   onToggleActive,
+  onDelete,
   onDraftChange,
   onSave,
   onCancel,
@@ -1135,6 +1336,7 @@ function TripOverrideModalContent({
   onAdd: () => void;
   onEdit: (override: TripOverride) => void;
   onToggleActive: (id: string) => void;
+  onDelete: (id: string) => void;
   onDraftChange: <Key extends keyof TripOverrideDraft>(key: Key, value: TripOverrideDraft[Key]) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -1199,12 +1401,12 @@ function TripOverrideModalContent({
                       <div className="grid gap-3 sm:grid-cols-3">
                         <OverrideDetail label="From City" value={override.fromCity} />
                         <OverrideDetail label="To City" value={override.toCity} />
-                        <OverrideDetail label="Sedan Price" value={formatInr(safeNumber(override.fixedPrice))} />
-                        <OverrideDetail label="Miles XL Markup" value={formatTripOverrideMilesXlMarkup(override)} />
-                        <OverrideDetail label="Miles XL Price" value={formatInr(calculateTripOverrideMilesXlPrice(override))} />
+                        <OverrideDetail label="Sedan Price" value={formatInr(safeNumber(override.sedanPrice))} />
+                        <OverrideDetail label="SUV Price" value={override.suvPrice ? formatInr(safeNumber(override.suvPrice)) : '—'} />
+                        <OverrideDetail label="Premium Price" value={override.premiumPrice ? formatInr(safeNumber(override.premiumPrice)) : '—'} />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <SwitchStatusPill label="Reverse Route" checked={override.includeReverse} />
+                        <SwitchStatusPill label="Reverse Route" checked={override.reverseRouteEnabled} />
                         <SwitchStatusPill
                           label="Active"
                           checked={override.isActive}
@@ -1243,7 +1445,7 @@ function TripOverrideModalContent({
               {editingId ? 'Edit Route Override' : 'Add Route Override'}
             </h3>
             <p className="mt-2 text-sm font-semibold leading-6 text-zinc-500">
-              Configure a Sedan city-to-city price with a future Miles XL markup. Street addresses are reduced to clean city names when saved.
+              Configure fixed city-to-city prices. Street addresses are reduced to clean city names when saved.
             </p>
           </div>
 
@@ -1265,36 +1467,27 @@ function TripOverrideModalContent({
               </div>
               <NumberField
                 label="Sedan Price"
-                value={draft.fixedPrice}
+                value={draft.sedanPrice}
                 prefix="₹"
-                onChange={(value) => onDraftChange('fixedPrice', value)}
+                onChange={(value) => onDraftChange('sedanPrice', value)}
               />
               <NumberField
-                label="Miles XL Markup"
-                value={draft.milesXlMarkupValue}
-                prefix={draft.milesXlMarkupType === 'flat' ? '₹' : undefined}
-                suffix={draft.milesXlMarkupType === 'percentage' ? '%' : undefined}
-                onChange={(value) => onDraftChange('milesXlMarkupValue', value)}
+                label="SUV Price"
+                value={draft.suvPrice}
+                prefix="₹"
+                onChange={(value) => onDraftChange('suvPrice', value)}
               />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <MarkupTypeButton
-                  active={draft.milesXlMarkupType === 'percentage'}
-                  onClick={() => onDraftChange('milesXlMarkupType', 'percentage')}
-                >
-                  Percentage (%)
-                </MarkupTypeButton>
-                <MarkupTypeButton
-                  active={draft.milesXlMarkupType === 'flat'}
-                  onClick={() => onDraftChange('milesXlMarkupType', 'flat')}
-                >
-                  Flat Amount (₹)
-                </MarkupTypeButton>
-              </div>
+              <NumberField
+                label="Premium Price"
+                value={draft.premiumPrice}
+                prefix="₹"
+                onChange={(value) => onDraftChange('premiumPrice', value)}
+              />
               <div className="grid gap-3">
                 <ToggleSwitchField
                   label="Reverse Route"
-                  checked={draft.includeReverse}
-                  onChange={(checked) => onDraftChange('includeReverse', checked)}
+                  checked={draft.reverseRouteEnabled}
+                  onChange={(checked) => onDraftChange('reverseRouteEnabled', checked)}
                 />
                 <ToggleSwitchField
                   label="Active"
@@ -1311,6 +1504,15 @@ function TripOverrideModalContent({
             ) : null}
 
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {editingId ? (
+                <button
+                  type="button"
+                  onClick={() => onDelete(editingId)}
+                  className="min-h-10 rounded-xl border border-red-500/40 px-4 text-sm font-black text-red-300 transition-colors hover:bg-red-500/10 focus:border-red-400 focus:outline-none sm:mr-auto"
+                >
+                  Delete
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onCancel}
@@ -2193,6 +2395,22 @@ function sanitizeNumericInputDraft(value?: string) {
   return isNumericInputDraft(nextValue) ? nextValue : '';
 }
 
+function formatInputNumber(value: number) {
+  return Number.isFinite(value) ? String(value) : '';
+}
+
+function toPricingVehicleType(value: VehicleType): PricingVehicleType {
+  if (value === 'SUV') {
+    return 'SUV';
+  }
+
+  if (value === 'Premium') {
+    return 'PREMIUM';
+  }
+
+  return 'SEDAN';
+}
+
 function overrideMatchesUniversalRouteFilter(override: TripOverride, filter: string) {
   const normalizedFilter = filter.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -2203,15 +2421,6 @@ function overrideMatchesUniversalRouteFilter(override: TripOverride, filter: str
   return [override.fromCity, override.toCity].some((city) =>
     city.toLowerCase().includes(normalizedFilter)
   );
-}
-
-function readStoredTripOverrides() {
-  try {
-    const storedTripOverrides = window.localStorage.getItem(TRIP_OVERRIDE_STORAGE_KEY);
-    return storedTripOverrides ? sanitizeTripOverrides(JSON.parse(storedTripOverrides)) : [];
-  } catch {
-    return [];
-  }
 }
 
 async function loadTripOverridesFromServer() {
@@ -2266,10 +2475,10 @@ function toTripOverrideApiPayload(override: TripOverride) {
     id: override.id,
     fromCity: override.fromCity,
     toCity: override.toCity,
-    sedanPrice: override.fixedPrice,
-    milesXlMarkup: override.milesXlMarkupValue,
-    milesXlMarkupType: override.milesXlMarkupType,
-    reverseRoute: override.includeReverse,
+    sedanPrice: override.sedanPrice,
+    suvPrice: override.suvPrice || null,
+    premiumPrice: override.premiumPrice || null,
+    reverseRouteEnabled: override.reverseRouteEnabled,
     active: override.isActive,
   };
 }

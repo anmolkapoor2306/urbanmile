@@ -48,6 +48,7 @@ model Booking {
   cancelledAt           DateTime?
   cancelReason          String?
   fareAmount            Decimal?               @db.Decimal(10, 2)
+  pricingSource         BookingPricingSource?  @default(PRICING_ENGINE)
   commissionAmount      Decimal?               @db.Decimal(10, 2)
   payoutAmount          Decimal?               @db.Decimal(10, 2)
   netEarningAmount      Decimal?               @db.Decimal(10, 2)
@@ -147,10 +148,14 @@ model RateLimitEvent {
 model Driver {
   id                 String             @id @default(uuid())
   name               String
-  phone              String
-  email              String?
-  vehicleType        CarType
-  vehicleNumber      String
+  fullName           String             @default("")
+  phone              String             @unique
+  email              String?            @unique
+  passwordHash       String?
+  status             DriverStatus       @default(ACTIVE)
+  dutyStatus         DriverDutyStatus   @default(OFFLINE)
+  vehicleType        CarType?
+  vehicleNumber      String?
   isActive           Boolean            @default(true)
   driverType         DriverType
   availabilityStatus DriverAvailability @default(AVAILABLE)
@@ -158,6 +163,10 @@ model Driver {
   licenseInfo        String?
   notes              String?
   vendorId           String?
+  currentLat         Float?
+  currentLng         Float?
+  lastLocationAt     DateTime?
+  lastLoginAt        DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @default(now()) @updatedAt
   driverCode         String?            @unique
@@ -166,6 +175,8 @@ model Driver {
   vehicles           Vehicle[]
 
   @@index([isActive])
+  @@index([status])
+  @@index([dutyStatus])
   @@index([driverType])
   @@index([availabilityStatus])
   @@index([vendorId])
@@ -235,21 +246,19 @@ model OutstationRoute {
 }
 
 model TripOverride {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fromCity             String
-  toCity               String
-  normalizedFromCity   String
-  normalizedToCity     String
-  sedanPrice           Decimal  @db.Decimal(10, 2)
-  milesXlMarkup        Decimal  @default(0) @db.Decimal(10, 2)
-  milesXlMarkupType    String   @default("percentage")
-  reverseRoute         Boolean  @default(true)
-  active               Boolean  @default(true)
-  createdAt            DateTime @default(now()) @db.Timestamp(6)
-  updatedAt            DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromCity            String
+  toCity              String
+  sedanPrice          Decimal  @db.Decimal(10, 2)
+  suvPrice            Decimal? @db.Decimal(10, 2)
+  premiumPrice        Decimal? @db.Decimal(10, 2)
+  reverseRouteEnabled Boolean  @default(true) @map("reverseRoute")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @db.Timestamp(6)
+  updatedAt           DateTime @default(now()) @updatedAt @db.Timestamp(6)
 
-  @@index([normalizedFromCity])
-  @@index([normalizedToCity])
+  @@index([fromCity])
+  @@index([toCity])
   @@index([active])
 }
 
@@ -269,6 +278,58 @@ model OperationalZone {
   @@index([status])
 }
 
+model ServiceControlConfig {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  singletonKey          String   @unique @default("default") @map("singleton_key")
+  allowIndiaWideBooking Boolean  @default(false) @map("allow_india_wide_booking")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+}
+
+model ServiceArea {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  city                String
+  centerLat           Float?                   @map("center_lat")
+  centerLng           Float?                   @map("center_lng")
+  status              OperationalZoneStatus    @default(ENABLED)
+  serviceRadiusKm     Int                      @default(50) @map("service_radius_km")
+  airportEnabled      Boolean                  @default(true) @map("airport_enabled")
+  outstationEnabled   Boolean                  @default(true) @map("outstation_enabled")
+  autoDispatchEnabled Boolean                  @default(true) @map("auto_dispatch_enabled")
+  enabledVehicleTypes OperationalVehicleType[] @default([SEDAN]) @map("enabled_vehicle_types")
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([city])
+  @@index([status])
+}
+
+model PricingConfig {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  singletonKey          String   @unique @default("default") @map("singleton_key")
+  fuelPricePerLiter     Decimal  @default(100) @map("fuel_price_per_liter") @db.Decimal(10, 2)
+  maintenanceCostPerKm  Decimal  @default(4) @map("maintenance_cost_per_km") @db.Decimal(10, 2)
+  platformCharges       Decimal  @default(50) @map("platform_charges") @db.Decimal(10, 2)
+  profitMarginPercent   Decimal  @default(18) @map("profit_margin_percent") @db.Decimal(8, 2)
+  driverMonthlySalary   Decimal  @default(28000) @map("driver_monthly_salary") @db.Decimal(12, 2)
+  carMonthlyEmi         Decimal  @default(22000) @map("car_monthly_emi") @db.Decimal(12, 2)
+  annualPermitCost      Decimal  @default(25000) @map("annual_permit_cost") @db.Decimal(12, 2)
+  annualInsuranceCost   Decimal  @default(32000) @map("annual_insurance_cost") @db.Decimal(12, 2)
+  monthlyOperationalKm  Decimal  @default(6000) @map("monthly_operational_km") @db.Decimal(12, 2)
+  annualOperationalKm   Decimal  @default(72000) @map("annual_operational_km") @db.Decimal(12, 2)
+  defaultOneWayTollCost Decimal  @default(250) @map("default_one_way_toll_cost") @db.Decimal(10, 2)
+  defaultRoundTripTollCost Decimal? @map("default_round_trip_toll_cost") @db.Decimal(10, 2)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+}
+
+model VehicleFuelEconomy {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleType  String   @unique @map("vehicle_type")
+  kmPerLiter   Decimal  @map("km_per_liter") @db.Decimal(8, 2)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+}
+
 enum BookingStatus {
   NEEDS_ASSIGNMENT
   ASSIGNED
@@ -277,10 +338,17 @@ enum BookingStatus {
   CANCELLED
 }
 
+enum BookingPricingSource {
+  PRICING_ENGINE
+  TRIP_OVERRIDE
+}
+
 enum DriverType {
   OWN
   THIRD_PARTY
   VENDOR
+  OWN_DRIVER
+  VENDOR_DRIVER
 }
 
 enum DriverAvailability {
@@ -289,11 +357,25 @@ enum DriverAvailability {
   OFFLINE
 }
 
+enum DriverStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum DriverDutyStatus {
+  ONLINE
+  OFFLINE
+  BREAK
+  ON_TRIP
+}
+
 enum CarType {
   SEDAN
   SUV
   VAN
   LUXURY
+  PREMIUM
 }
 
 enum BookingType {

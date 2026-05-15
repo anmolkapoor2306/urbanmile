@@ -79,7 +79,7 @@ async function loadDashboardDriversSafely() {
   try {
     const drivers = await prisma.driver.findMany({
       select: driverRecordSelect,
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      orderBy: [{ status: 'asc' }, { fullName: 'asc' }],
     });
 
     return {

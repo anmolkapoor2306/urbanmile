@@ -1,7 +1,9 @@
 export const OPERATIONAL_ZONE_STATUSES = ['ENABLED', 'LIMITED', 'DISABLED'] as const;
 export const OPERATIONAL_VEHICLE_TYPES = ['SEDAN', 'SUV', 'PREMIUM'] as const;
-export const PICKUP_UNSERVICEABLE_MESSAGE = 'Service is not available in this pickup area yet.';
-export const PICKUP_MANUAL_CONFIRMATION_MESSAGE = 'This area requires manual confirmation.';
+export const PICKUP_UNSERVICEABLE_MESSAGE = 'Pickup area is not serviceable yet.';
+export const DROPOFF_UNSERVICEABLE_MESSAGE = 'Drop-off area is not serviceable yet.';
+export const ROUTE_MANUAL_CONFIRMATION_MESSAGE = 'This route requires manual confirmation.';
+export const PICKUP_MANUAL_CONFIRMATION_MESSAGE = ROUTE_MANUAL_CONFIRMATION_MESSAGE;
 
 export type OperationalZoneStatus = (typeof OPERATIONAL_ZONE_STATUSES)[number];
 export type OperationalVehicleType = (typeof OPERATIONAL_VEHICLE_TYPES)[number];
@@ -9,6 +11,8 @@ export type OperationalVehicleType = (typeof OPERATIONAL_VEHICLE_TYPES)[number];
 export type SerializedOperationalZone = {
   id: string;
   city: string;
+  centerLat: number | null;
+  centerLng: number | null;
   status: OperationalZoneStatus;
   airportEnabled: boolean;
   outstationEnabled: boolean;
@@ -19,20 +23,48 @@ export type SerializedOperationalZone = {
   updatedAt: string;
 };
 
+export type SerializedServiceControlConfig = {
+  allowIndiaWideBooking: boolean;
+};
+
 export type OperationalZoneBookingInput = {
   pickupLocation: string;
   pickupLatitude?: number | null;
   pickupLongitude?: number | null;
   dropoffLocation?: string | null;
+  dropoffLatitude?: number | null;
+  dropoffLongitude?: number | null;
   carType?: string | null;
   bookingMode?: string | null;
 };
 
 export type OperationalZoneValidationResult =
-  | { ok: true; zone: SerializedOperationalZone }
-  | { ok: false; zone: SerializedOperationalZone | null; code: string; message: string };
+  | {
+      ok: true;
+      zone: SerializedOperationalZone | null;
+      pickupZone: SerializedOperationalZone | null;
+      dropoffZone: SerializedOperationalZone | null;
+      confirmation: 'instant' | 'manual';
+      code: string | null;
+      message: string | null;
+    }
+  | {
+      ok: false;
+      zone: SerializedOperationalZone | null;
+      pickupZone: SerializedOperationalZone | null;
+      dropoffZone: SerializedOperationalZone | null;
+      code: string;
+      message: string;
+    };
 
 export type PickupServiceabilityResult =
+  | {
+      serviceable: true;
+      confirmation: 'instant';
+      zone: null;
+      code: 'INDIA_WIDE_ENABLED';
+      message: null;
+    }
   | {
       serviceable: true;
       confirmation: 'instant';
@@ -45,14 +77,61 @@ export type PickupServiceabilityResult =
       confirmation: 'manual';
       zone: SerializedOperationalZone;
       code: 'ZONE_LIMITED';
-      message: typeof PICKUP_MANUAL_CONFIRMATION_MESSAGE;
+      message: typeof ROUTE_MANUAL_CONFIRMATION_MESSAGE;
     }
   | {
       serviceable: false;
+      locationType: 'pickup' | 'dropoff';
       confirmation: 'blocked';
       zone: SerializedOperationalZone | null;
       code: string;
-      message: typeof PICKUP_UNSERVICEABLE_MESSAGE;
+      message: typeof PICKUP_UNSERVICEABLE_MESSAGE | typeof DROPOFF_UNSERVICEABLE_MESSAGE;
+    };
+
+type ServicePointResult =
+  | {
+      serviceable: true;
+      confirmation: 'instant';
+      zone: SerializedOperationalZone;
+      code: 'ZONE_ENABLED';
+      message: null;
+    }
+  | {
+      serviceable: true;
+      confirmation: 'manual';
+      zone: SerializedOperationalZone;
+      code: 'ZONE_LIMITED';
+      message: typeof ROUTE_MANUAL_CONFIRMATION_MESSAGE;
+    }
+  | Extract<PickupServiceabilityResult, { serviceable: false }>;
+
+type ServiceUnavailableResult = Extract<PickupServiceabilityResult, { serviceable: false }>;
+
+export type RouteServiceabilityResult =
+  | {
+      ok: true;
+      confirmation: 'instant';
+      pickupZone: SerializedOperationalZone | null;
+      dropoffZone: SerializedOperationalZone | null;
+      code: 'ROUTE_INSTANT';
+      message: null;
+    }
+  | {
+      ok: true;
+      confirmation: 'manual';
+      pickupZone: SerializedOperationalZone | null;
+      dropoffZone: SerializedOperationalZone | null;
+      code: 'ROUTE_MANUAL';
+      message: typeof ROUTE_MANUAL_CONFIRMATION_MESSAGE;
+    }
+  | {
+      ok: false;
+      locationType: 'pickup' | 'dropoff';
+      confirmation: 'blocked';
+      pickupZone: SerializedOperationalZone | null;
+      dropoffZone: SerializedOperationalZone | null;
+      code: string;
+      message: typeof PICKUP_UNSERVICEABLE_MESSAGE | typeof DROPOFF_UNSERVICEABLE_MESSAGE;
     };
 
 export function normalizeOperationalZoneText(value: string | null | undefined) {
@@ -90,8 +169,43 @@ export function isOutstationRide(input: OperationalZoneBookingInput) {
 
 export function findMatchingOperationalZone(
   zones: SerializedOperationalZone[],
-  pickupLocation: string
+  pickupLocation: string,
+  pickupLatitude?: number | null,
+  pickupLongitude?: number | null
 ): SerializedOperationalZone | null {
+  if (
+    typeof pickupLatitude === 'number' &&
+    Number.isFinite(pickupLatitude) &&
+    typeof pickupLongitude === 'number' &&
+    Number.isFinite(pickupLongitude)
+  ) {
+    let comparableZoneCount = 0;
+    const coordinateMatches = zones
+      .map((zone) => {
+        const center =
+          typeof zone.centerLat === 'number' && typeof zone.centerLng === 'number'
+            ? { latitude: zone.centerLat, longitude: zone.centerLng }
+            : getCityCenterCoordinates(zone.city);
+        if (!center) return null;
+        comparableZoneCount += 1;
+        const distanceKm = calculateDistanceKm(
+          { latitude: pickupLatitude, longitude: pickupLongitude },
+          center
+        );
+        return distanceKm <= zone.serviceRadiusKm ? { zone, distanceKm } : null;
+      })
+      .filter((match): match is { zone: SerializedOperationalZone; distanceKm: number } => Boolean(match))
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+
+    if (coordinateMatches[0]) {
+      return coordinateMatches[0].zone;
+    }
+
+    if (comparableZoneCount > 0) {
+      return null;
+    }
+  }
+
   const normalizedPickup = normalizeOperationalZoneText(pickupLocation);
   if (!normalizedPickup) return null;
 
@@ -109,43 +223,121 @@ export function validateOperationalZoneForBooking(
   zones: SerializedOperationalZone[],
   input: OperationalZoneBookingInput
 ): OperationalZoneValidationResult {
-  const serviceability = isPickupServiceable(
-    zones,
-    input.pickupLocation,
-    input.pickupLatitude,
-    input.pickupLongitude,
-    input.carType,
-    input.bookingMode,
-    input.dropoffLocation
-  );
+  const serviceability = isRouteServiceable(zones, input);
 
-  if (!serviceability.serviceable) {
+  if (!serviceability.ok) {
     return {
       ok: false,
-      zone: serviceability.zone,
+      zone: serviceability.pickupZone,
+      pickupZone: serviceability.pickupZone,
+      dropoffZone: serviceability.dropoffZone,
       code: serviceability.code,
       message: serviceability.message,
     };
   }
 
-  return { ok: true, zone: serviceability.zone };
+  return {
+    ok: true,
+    zone: serviceability.pickupZone,
+    pickupZone: serviceability.pickupZone,
+    dropoffZone: serviceability.dropoffZone,
+    confirmation: serviceability.confirmation,
+    code: serviceability.code,
+    message: serviceability.message,
+  };
 }
 
 export function isBookingDispatchableByZone(
   zones: SerializedOperationalZone[],
-  booking: Pick<OperationalZoneBookingInput, 'pickupLocation' | 'pickupLatitude' | 'pickupLongitude' | 'dropoffLocation' | 'carType'>
+  booking: Pick<OperationalZoneBookingInput, 'pickupLocation' | 'pickupLatitude' | 'pickupLongitude' | 'dropoffLocation' | 'dropoffLatitude' | 'dropoffLongitude' | 'carType'> & { confirmedAt?: Date | string | null },
+  config?: SerializedServiceControlConfig
 ) {
-  const serviceability = isPickupServiceable(
-    zones,
-    booking.pickupLocation,
-    booking.pickupLatitude,
-    booking.pickupLongitude,
-    booking.carType,
-    'ONE_WAY',
-    booking.dropoffLocation
-  );
+  if (booking.confirmedAt === null) {
+    return false;
+  }
 
-  return serviceability.serviceable && serviceability.confirmation === 'instant' && serviceability.zone.autoDispatchEnabled;
+  if (config?.allowIndiaWideBooking) {
+    return true;
+  }
+
+  const serviceability = isRouteServiceable(zones, {
+    pickupLocation: booking.pickupLocation,
+    pickupLatitude: booking.pickupLatitude,
+    pickupLongitude: booking.pickupLongitude,
+    dropoffLocation: booking.dropoffLocation,
+    dropoffLatitude: booking.dropoffLatitude,
+    dropoffLongitude: booking.dropoffLongitude,
+    carType: booking.carType,
+    bookingMode: 'ONE_WAY',
+  });
+
+  return serviceability.ok &&
+    serviceability.confirmation === 'instant' &&
+    Boolean(serviceability.pickupZone?.autoDispatchEnabled) &&
+    Boolean(serviceability.dropoffZone?.autoDispatchEnabled);
+}
+
+export function isRouteServiceable(
+  zones: SerializedOperationalZone[],
+  input: OperationalZoneBookingInput,
+  config?: SerializedServiceControlConfig
+): RouteServiceabilityResult {
+  if (config?.allowIndiaWideBooking) {
+    return {
+      ok: true,
+      confirmation: 'instant',
+      pickupZone: null,
+      dropoffZone: null,
+      code: 'ROUTE_INSTANT',
+      message: null,
+    };
+  }
+
+  const pickup = evaluateServicePoint(zones, input, 'pickup');
+  if (!pickup.serviceable) {
+    return {
+      ok: false,
+      locationType: 'pickup',
+      confirmation: 'blocked',
+      pickupZone: pickup.zone,
+      dropoffZone: null,
+      code: pickup.code,
+      message: pickup.message,
+    };
+  }
+
+  const dropoff = evaluateServicePoint(zones, input, 'dropoff');
+  if (!dropoff.serviceable) {
+    return {
+      ok: false,
+      locationType: 'dropoff',
+      confirmation: 'blocked',
+      pickupZone: pickup.zone,
+      dropoffZone: dropoff.zone,
+      code: dropoff.code,
+      message: dropoff.message,
+    };
+  }
+
+  if (pickup.zone.status === 'LIMITED' || dropoff.zone.status === 'LIMITED') {
+    return {
+      ok: true,
+      confirmation: 'manual',
+      pickupZone: pickup.zone,
+      dropoffZone: dropoff.zone,
+      code: 'ROUTE_MANUAL',
+      message: ROUTE_MANUAL_CONFIRMATION_MESSAGE,
+    };
+  }
+
+  return {
+    ok: true,
+    confirmation: 'instant',
+    pickupZone: pickup.zone,
+    dropoffZone: dropoff.zone,
+    code: 'ROUTE_INSTANT',
+    message: null,
+  };
 }
 
 export function isPickupServiceable(
@@ -155,8 +347,19 @@ export function isPickupServiceable(
   pickupLng?: number | null,
   vehicleType?: string | null,
   rideType?: string | null,
-  dropoffAddress?: string | null
+  dropoffAddress?: string | null,
+  config?: SerializedServiceControlConfig
 ): PickupServiceabilityResult {
+  if (config?.allowIndiaWideBooking) {
+    return {
+      serviceable: true,
+      confirmation: 'instant',
+      zone: null,
+      code: 'INDIA_WIDE_ENABLED',
+      message: null,
+    };
+  }
+
   const input: OperationalZoneBookingInput = {
     pickupLocation: pickupAddress,
     pickupLatitude: pickupLat,
@@ -165,7 +368,7 @@ export function isPickupServiceable(
     bookingMode: rideType,
     dropoffLocation: dropoffAddress,
   };
-  const zone = findMatchingOperationalZone(zones, pickupAddress);
+  const zone = findMatchingOperationalZone(zones, pickupAddress, pickupLat, pickupLng);
 
   if (!zone) {
     return serviceUnavailable(null, 'ZONE_UNSUPPORTED');
@@ -203,7 +406,7 @@ export function isPickupServiceable(
       confirmation: 'manual',
       zone,
       code: 'ZONE_LIMITED',
-      message: PICKUP_MANUAL_CONFIRMATION_MESSAGE,
+      message: ROUTE_MANUAL_CONFIRMATION_MESSAGE,
     };
   }
 
@@ -216,32 +419,108 @@ export function isPickupServiceable(
   };
 }
 
-function serviceUnavailable(zone: SerializedOperationalZone | null, code: string): PickupServiceabilityResult {
+function evaluateServicePoint(
+  zones: SerializedOperationalZone[],
+  input: OperationalZoneBookingInput,
+  locationType: 'pickup' | 'dropoff'
+): ServicePointResult {
+  const isPickup = locationType === 'pickup';
+  const location = isPickup ? input.pickupLocation : input.dropoffLocation ?? '';
+  const latitude = isPickup ? input.pickupLatitude : input.dropoffLatitude;
+  const longitude = isPickup ? input.pickupLongitude : input.dropoffLongitude;
+  const zone = findMatchingOperationalZone(zones, location, latitude, longitude);
+
+  if (!zone) {
+    return serviceUnavailable(null, `${locationType.toUpperCase()}_ZONE_UNSUPPORTED`, locationType);
+  }
+
+  if (zone.status === 'DISABLED') {
+    return serviceUnavailable(zone, `${locationType.toUpperCase()}_ZONE_DISABLED`, locationType);
+  }
+
+  if (!isLocationWithinServiceRadius(zone, latitude, longitude)) {
+    return serviceUnavailable(zone, `${locationType.toUpperCase()}_ZONE_RADIUS_EXCEEDED`, locationType);
+  }
+
+  const mappedVehicleType = mapCarTypeToOperationalVehicleType(input.carType);
+  if (!zone.enabledVehicleTypes.includes(mappedVehicleType)) {
+    return serviceUnavailable(zone, `${locationType.toUpperCase()}_VEHICLE_TYPE_UNSUPPORTED`, locationType);
+  }
+
+  if (isAirportRide(input) && !zone.airportEnabled) {
+    return serviceUnavailable(zone, `${locationType.toUpperCase()}_AIRPORT_UNSUPPORTED`, locationType);
+  }
+
+  const otherZone = findMatchingOperationalZone(
+    zones,
+    isPickup ? input.dropoffLocation ?? '' : input.pickupLocation,
+    isPickup ? input.dropoffLatitude : input.pickupLatitude,
+    isPickup ? input.dropoffLongitude : input.pickupLongitude
+  );
+  const rideIsOutstation = otherZone
+    ? normalizeOperationalZoneText(otherZone.city) !== normalizeOperationalZoneText(zone.city)
+    : isOutstationRide(input);
+
+  if (rideIsOutstation && !zone.outstationEnabled) {
+    return serviceUnavailable(zone, `${locationType.toUpperCase()}_OUTSTATION_UNSUPPORTED`, locationType);
+  }
+
+  if (zone.status === 'LIMITED') {
+    return {
+      serviceable: true,
+      confirmation: 'manual',
+      zone,
+      code: 'ZONE_LIMITED',
+      message: ROUTE_MANUAL_CONFIRMATION_MESSAGE,
+    };
+  }
+
+  return {
+    serviceable: true,
+    confirmation: 'instant',
+    zone,
+    code: 'ZONE_ENABLED',
+    message: null,
+  };
+}
+
+function serviceUnavailable(zone: SerializedOperationalZone | null, code: string, locationType: 'pickup' | 'dropoff' = 'pickup'): ServiceUnavailableResult {
   return {
     serviceable: false,
+    locationType,
     confirmation: 'blocked',
     zone,
     code,
-    message: PICKUP_UNSERVICEABLE_MESSAGE,
+    message: locationType === 'pickup' ? PICKUP_UNSERVICEABLE_MESSAGE : DROPOFF_UNSERVICEABLE_MESSAGE,
   };
 }
 
 export function isPickupWithinServiceRadius(zone: SerializedOperationalZone, input: OperationalZoneBookingInput) {
-  const { pickupLatitude, pickupLongitude } = input;
+  return isLocationWithinServiceRadius(zone, input.pickupLatitude, input.pickupLongitude);
+}
+
+export function isLocationWithinServiceRadius(
+  zone: SerializedOperationalZone,
+  latitude?: number | null,
+  longitude?: number | null
+) {
   if (
-    typeof pickupLatitude !== 'number' ||
-    !Number.isFinite(pickupLatitude) ||
-    typeof pickupLongitude !== 'number' ||
-    !Number.isFinite(pickupLongitude)
+    typeof latitude !== 'number' ||
+    !Number.isFinite(latitude) ||
+    typeof longitude !== 'number' ||
+    !Number.isFinite(longitude)
   ) {
     return true;
   }
 
-  const center = getCityCenterCoordinates(zone.city);
+  const center =
+    typeof zone.centerLat === 'number' && typeof zone.centerLng === 'number'
+      ? { latitude: zone.centerLat, longitude: zone.centerLng }
+      : getCityCenterCoordinates(zone.city);
   if (!center) return true;
 
   const distanceKm = calculateDistanceKm(
-    { latitude: pickupLatitude, longitude: pickupLongitude },
+    { latitude, longitude },
     center
   );
 

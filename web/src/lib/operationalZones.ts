@@ -1,14 +1,18 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
   isPickupServiceable as isPickupServiceableFromZones,
+  isRouteServiceable as isRouteServiceableFromZones,
   validateOperationalZoneForBooking,
   type OperationalZoneBookingInput,
+  type SerializedServiceControlConfig,
   type SerializedOperationalZone,
 } from '@/lib/operationalZoneRules';
 
 type OperationalZoneRecord = {
   id: string;
   city: string;
+  centerLat: number | null;
+  centerLng: number | null;
   status: string;
   airportEnabled: boolean;
   outstationEnabled: boolean;
@@ -19,11 +23,13 @@ type OperationalZoneRecord = {
   updatedAt: Date | string;
 };
 
-type OperationalZoneClient = Pick<PrismaClient, 'operationalZone' | '$queryRawUnsafe'> | Prisma.TransactionClient;
+type OperationalZoneClient = Pick<PrismaClient, 'serviceArea' | 'serviceControlConfig' | '$queryRawUnsafe'> | Prisma.TransactionClient;
 
 export const operationalZoneSelect = {
   id: true,
   city: true,
+  centerLat: true,
+  centerLng: true,
   status: true,
   serviceRadiusKm: true,
   airportEnabled: true,
@@ -32,12 +38,14 @@ export const operationalZoneSelect = {
   enabledVehicleTypes: true,
   createdAt: true,
   updatedAt: true,
-} satisfies Prisma.OperationalZoneSelect;
+} satisfies Prisma.ServiceAreaSelect;
 
 export function serializeOperationalZone(zone: OperationalZoneRecord): SerializedOperationalZone {
   return {
     id: zone.id,
     city: zone.city,
+    centerLat: zone.centerLat,
+    centerLng: zone.centerLng,
     status: zone.status as SerializedOperationalZone['status'],
     airportEnabled: zone.airportEnabled,
     outstationEnabled: zone.outstationEnabled,
@@ -50,13 +58,13 @@ export function serializeOperationalZone(zone: OperationalZoneRecord): Serialize
 }
 
 export async function getOperationalZones(client: OperationalZoneClient) {
-  if (!client.operationalZone) {
+  if (!client.serviceArea) {
     const zones = await getOperationalZonesWithRawSql(client);
 
     return zones.map(serializeOperationalZone);
   }
 
-  const zones = await client.operationalZone.findMany({
+  const zones = await client.serviceArea.findMany({
     select: operationalZoneSelect,
     orderBy: [{ city: 'asc' }],
   });
@@ -69,7 +77,41 @@ export async function assertOperationalZoneSupportsBooking(
   input: OperationalZoneBookingInput
 ) {
   const zones = await getOperationalZones(client);
+  const config = await getServiceControlConfig(client);
+  if (config.allowIndiaWideBooking) {
+    return {
+      ok: true,
+      zone: null,
+      pickupZone: null,
+      dropoffZone: null,
+      confirmation: 'instant',
+      code: 'INDIA_WIDE_ENABLED',
+      message: null,
+    } as const;
+  }
   return validateOperationalZoneForBooking(zones, input);
+}
+
+export async function getServiceControlConfig(client: OperationalZoneClient): Promise<SerializedServiceControlConfig> {
+  if (!client.serviceControlConfig) {
+    const records = await client.$queryRawUnsafe<{ allowIndiaWideBooking: boolean }[]>(
+      `SELECT "allow_india_wide_booking" AS "allowIndiaWideBooking"
+       FROM "ServiceControlConfig"
+       WHERE "singleton_key" = 'default'
+       LIMIT 1`
+    );
+
+    return { allowIndiaWideBooking: Boolean(records[0]?.allowIndiaWideBooking) };
+  }
+
+  const config = await client.serviceControlConfig.upsert({
+    where: { singletonKey: 'default' },
+    update: {},
+    create: { singletonKey: 'default' },
+    select: { allowIndiaWideBooking: true },
+  });
+
+  return { allowIndiaWideBooking: config.allowIndiaWideBooking };
 }
 
 export async function isPickupServiceable(
@@ -82,7 +124,17 @@ export async function isPickupServiceable(
   dropoffAddress?: string | null
 ) {
   const zones = await getOperationalZones(client);
-  return isPickupServiceableFromZones(zones, pickupAddress, pickupLat, pickupLng, vehicleType, rideType, dropoffAddress);
+  const config = await getServiceControlConfig(client);
+  return isPickupServiceableFromZones(zones, pickupAddress, pickupLat, pickupLng, vehicleType, rideType, dropoffAddress, config);
+}
+
+export async function isRouteServiceable(
+  client: OperationalZoneClient,
+  input: OperationalZoneBookingInput
+) {
+  const zones = await getOperationalZones(client);
+  const config = await getServiceControlConfig(client);
+  return isRouteServiceableFromZones(zones, input, config);
 }
 
 async function getOperationalZonesWithRawSql(client: OperationalZoneClient) {
@@ -90,7 +142,7 @@ async function getOperationalZonesWithRawSql(client: OperationalZoneClient) {
     `SELECT column_name
      FROM information_schema.columns
      WHERE table_schema = current_schema()
-       AND table_name = 'OperationalZone'`
+       AND table_name = 'ServiceArea'`
   );
   const columnNames = new Set(columns.map((column) => column.column_name));
 
@@ -106,6 +158,8 @@ async function getOperationalZonesWithRawSql(client: OperationalZoneClient) {
     `SELECT
        "id",
        "city",
+       "center_lat" AS "centerLat",
+       "center_lng" AS "centerLng",
        "status",
        ${airportColumn} AS "airportEnabled",
        ${outstationColumn} AS "outstationEnabled",
@@ -114,7 +168,7 @@ async function getOperationalZonesWithRawSql(client: OperationalZoneClient) {
        ${serviceRadiusColumn} AS "serviceRadiusKm",
        ${createdAtColumn} AS "createdAt",
        ${updatedAtColumn} AS "updatedAt"
-     FROM "OperationalZone"
+     FROM "ServiceArea"
      ORDER BY "city" ASC`
   );
 }

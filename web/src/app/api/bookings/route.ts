@@ -108,6 +108,8 @@ export async function POST(request: NextRequest) {
       pickupLocation,
       pickupLatitude,
       pickupLongitude,
+      dropoffLatitude,
+      dropoffLongitude,
       dropoffLocation,
       carType,
       bookingMode: 'ONE_WAY',
@@ -116,6 +118,8 @@ export async function POST(request: NextRequest) {
     if (!zoneCheck.ok) {
       return NextResponse.json({ error: zoneCheck.message, code: zoneCheck.code }, { status: 422 });
     }
+
+    const manualConfirmationRequired = zoneCheck.confirmation === 'manual';
 
     const booking = await prisma.$transaction(async (tx) => {
       const id = crypto.randomUUID();
@@ -144,8 +148,9 @@ export async function POST(request: NextRequest) {
           pickupDateTime: pickupAt,
           carType,
           specialInstructions: specialInstructions || null,
+          internalNotes: manualConfirmationRequired ? 'Manual confirmation required by Service Control.' : null,
           status: 'NEEDS_ASSIGNMENT',
-          confirmedAt: new Date(),
+          confirmedAt: manualConfirmationRequired ? null : new Date(),
         },
         select: bookingRecordSelect,
       });

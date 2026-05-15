@@ -116,11 +116,11 @@ export function buildDispatchMetrics(bookings: SerializedBooking[], drivers: Ser
 
   return {
     totalDrivers: drivers.length,
-    availableDrivers: drivers.filter((driver) => driver.isActive && driver.availabilityStatus === 'AVAILABLE').length,
-    busyDrivers: drivers.filter((driver) => driver.availabilityStatus === 'BUSY').length,
-    offDutyDrivers: drivers.filter((driver) => !driver.isActive || driver.availabilityStatus === 'OFFLINE').length,
+    availableDrivers: drivers.filter((driver) => driver.status === 'ACTIVE' && driver.dutyStatus === 'ONLINE').length,
+    busyDrivers: drivers.filter((driver) => driver.dutyStatus === 'ON_TRIP').length,
+    offDutyDrivers: drivers.filter((driver) => driver.status !== 'ACTIVE' || driver.dutyStatus === 'OFFLINE').length,
     vendorAvailableDrivers: drivers.filter(
-      (driver) => driver.isActive && driver.driverType === 'VENDOR' && driver.availabilityStatus === 'AVAILABLE'
+      (driver) => driver.status === 'ACTIVE' && driver.driverType === 'VENDOR_DRIVER' && driver.dutyStatus === 'ONLINE'
     ).length,
     confirmedWaitingForDispatch: metrics.confirmedWaitingForAssignment.length,
     activeTrips: metrics.activeTripsCount,

@@ -9,27 +9,32 @@ import { cn, toTitleCase } from '@/lib/utils';
 
 type DriverFormState = {
   id?: string;
-  name: string;
+  fullName: string;
   phone: string;
   email: string;
+  password: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  driverType: 'OWN_DRIVER' | 'VENDOR_DRIVER';
   licenseInfo: string;
-  availabilityStatus?: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
-  notes: string;
 };
 
 const emptyForm: DriverFormState = {
-  name: '',
+  fullName: '',
   phone: '',
   email: '',
+  password: '',
+  status: 'ACTIVE',
+  driverType: 'OWN_DRIVER',
   licenseInfo: '',
-  notes: '',
 };
 
 export function DriverManagementTable({ drivers, bookings = [] }: { drivers: SerializedDriver[]; bookings?: SerializedBooking[] }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR'>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AVAILABLE' | 'ASSIGNED' | 'ON_TRIP' | 'OFF_DUTY'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'OWN_DRIVER' | 'VENDOR_DRIVER'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'>('ALL');
+  const [dutyFilter, setDutyFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE' | 'BREAK' | 'ON_TRIP'>('ALL');
+  const [vehicleFilter, setVehicleFilter] = useState<'ALL' | 'SEDAN' | 'SUV' | 'PREMIUM'>('ALL');
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [editingDriver, setEditingDriver] = useState<DriverFormState | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -39,17 +44,18 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
     const query = search.toLowerCase();
     return drivers.filter((driver) => {
       const matchesType = typeFilter === 'ALL' || driver.driverType === typeFilter;
-      const visualStatus = getDriverVisualStatus(driver, bookings);
-      const matchesStatus = statusFilter === 'ALL' || visualStatus === statusFilter;
+      const matchesStatus = statusFilter === 'ALL' || driver.status === statusFilter;
+      const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
+      const matchesVehicle = vehicleFilter === 'ALL' || driver.vehicleType === vehicleFilter;
       const matchesSearch =
         driver.name.toLowerCase().includes(query) ||
         driver.phone.includes(search) ||
         (driver.email || '').toLowerCase().includes(query) ||
         (driver.driverCode || '').toLowerCase().includes(query);
 
-      return matchesType && matchesStatus && matchesSearch;
+      return matchesType && matchesStatus && matchesDuty && matchesVehicle && matchesSearch;
     });
-  }, [bookings, drivers, search, statusFilter, typeFilter]);
+  }, [drivers, dutyFilter, search, statusFilter, typeFilter, vehicleFilter]);
 
   const selectedDriver = useMemo(
     () => (selectedDriverId ? drivers.find((driver) => driver.id === selectedDriverId) ?? null : null),
@@ -74,19 +80,22 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
     const payload = editingDriver.id
       ? {
           id: editingDriver.id,
-          name: editingDriver.name,
+          fullName: editingDriver.fullName,
           phone: editingDriver.phone,
           email: editingDriver.email,
-          availabilityStatus: editingDriver.availabilityStatus,
+          ...(editingDriver.password ? { password: editingDriver.password } : {}),
+          status: editingDriver.status,
+          driverType: editingDriver.driverType,
           licenseInfo: editingDriver.licenseInfo,
-          notes: editingDriver.notes,
         }
       : {
-          name: editingDriver.name,
+          fullName: editingDriver.fullName,
           phone: editingDriver.phone,
           email: editingDriver.email,
+          password: editingDriver.password,
+          status: editingDriver.status,
+          driverType: editingDriver.driverType,
           licenseInfo: editingDriver.licenseInfo,
-          notes: editingDriver.notes,
         };
 
     try {
@@ -149,12 +158,13 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
   function startEditingDriver(driver: SerializedDriver) {
     setEditingDriver({
       id: driver.id,
-      name: driver.name,
+      fullName: driver.fullName || driver.name,
       phone: driver.phone,
       email: driver.email || '',
+      password: '',
+      status: (driver.status || 'ACTIVE') as DriverFormState['status'],
+      driverType: (driver.driverType === 'VENDOR_DRIVER' ? 'VENDOR_DRIVER' : 'OWN_DRIVER') as DriverFormState['driverType'],
       licenseInfo: driver.licenseInfo || '',
-      availabilityStatus: (driver.availabilityStatus || 'OFFLINE') as DriverFormState['availabilityStatus'],
-      notes: driver.notes || '',
     });
   }
 
@@ -163,7 +173,7 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
     setOpenMenuId(null);
   }
 
-  async function runDriverAction(action: 'edit' | 'remove' | 'toggle-active' | 'toggle-availability' | 'off-duty', driver: SerializedDriver) {
+  async function runDriverAction(action: 'edit' | 'remove' | 'toggle-active', driver: SerializedDriver) {
     setOpenMenuId(null);
 
     if (action === 'edit') {
@@ -177,18 +187,11 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
     }
 
     if (action === 'toggle-active') {
-      await updateDriver(driver.id, { isActive: !driver.isActive });
+      await updateDriver(driver.id, { status: driver.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' });
       return;
     }
 
-    if (action === 'toggle-availability') {
-      await updateDriver(driver.id, {
-        availabilityStatus: getDriverVisualStatus(driver, bookings) === 'AVAILABLE' ? 'OFFLINE' : 'AVAILABLE',
-      });
-      return;
-    }
-
-    await updateDriver(driver.id, { availabilityStatus: 'OFFLINE' });
+    return;
   }
 
   return (
@@ -205,13 +208,12 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
             />
             <select
               value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value as 'ALL' | 'OWN' | 'THIRD_PARTY' | 'VENDOR')}
+              onChange={(event) => setTypeFilter(event.target.value as typeof typeFilter)}
               className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-56"
             >
               <option value="ALL">All Driver Types</option>
-              <option value="OWN">Own Driver</option>
-              <option value="THIRD_PARTY">Third Party Driver</option>
-              <option value="VENDOR">Vendor / Company</option>
+              <option value="OWN_DRIVER">Own Driver</option>
+              <option value="VENDOR_DRIVER">Vendor Driver</option>
             </select>
             <select
               value={statusFilter}
@@ -219,10 +221,30 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
               className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-48"
             >
               <option value="ALL">All Statuses</option>
-              <option value="AVAILABLE">Available</option>
-              <option value="ASSIGNED">Assigned</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="SUSPENDED">Suspended</option>
+            </select>
+            <select
+              value={dutyFilter}
+              onChange={(event) => setDutyFilter(event.target.value as typeof dutyFilter)}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-48"
+            >
+              <option value="ALL">All Duty</option>
+              <option value="ONLINE">Online</option>
+              <option value="OFFLINE">Offline</option>
+              <option value="BREAK">Break</option>
               <option value="ON_TRIP">On Trip</option>
-              <option value="OFF_DUTY">Off Duty</option>
+            </select>
+            <select
+              value={vehicleFilter}
+              onChange={(event) => setVehicleFilter(event.target.value as typeof vehicleFilter)}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-400/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:w-48"
+            >
+              <option value="ALL">All Vehicles</option>
+              <option value="SEDAN">Sedan</option>
+              <option value="SUV">SUV</option>
+              <option value="PREMIUM">Premium</option>
             </select>
           </div>
 
@@ -319,12 +341,8 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
                               >
                                 <ActionMenuItem label="Edit" onClick={() => void runDriverAction('edit', driver)} />
                                 <ActionMenuItem
-                                  label={driver.isActive ? 'Deactivate' : 'Activate'}
+                                  label={driver.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                                   onClick={() => void runDriverAction('toggle-active', driver)}
-                                />
-                                <ActionMenuItem
-                                  label={visualStatus === 'AVAILABLE' ? 'Mark Busy' : 'Mark Available'}
-                                  onClick={() => void runDriverAction('toggle-availability', driver)}
                                 />
                                 <ActionMenuItem label="Remove" tone="danger" onClick={() => void runDriverAction('remove', driver)} />
                               </div>
@@ -369,24 +387,21 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
                   <div className="grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 md:grid-cols-2">
                     <DetailRow label="Phone" value={selectedDriver.phone} />
                     <DetailRow label="Email" value={selectedDriver.email || 'Not provided'} />
+                    <DetailRow label="Driver Code" value={getDriverCodeValue(selectedDriver)} />
+                    <DetailRow label="Duty Status" value={formatDutyStatus(selectedDriver.dutyStatus)} />
+                    <DetailRow label="Vehicle" value={selectedDriver.vehicleType ? `${selectedDriver.vehicleType}${selectedDriver.vehicleNumber ? ` · ${selectedDriver.vehicleNumber}` : ''}` : 'Not assigned'} />
+                    <DetailRow label="Last Login" value={selectedDriver.lastLoginAt ? formatDateTime(selectedDriver.lastLoginAt) : 'Not yet'} />
                     <DetailRow label="License" value={selectedDriver.licenseInfo || 'N/A'} />
-                    <DetailRow label="Notes" value={selectedDriver.notes || 'No notes'} />
                   </div>
 
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
                     <div className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Quick Actions</div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <QuickActionButton onClick={() => startEditingDriver(selectedDriver)}>Edit Driver</QuickActionButton>
+                      <QuickActionButton onClick={() => startEditingDriver(selectedDriver)}>Reset Password</QuickActionButton>
                       <QuickActionButton onClick={() => void runDriverAction('toggle-active', selectedDriver)}>
-                        {selectedDriver.isActive ? 'Deactivate Driver' : 'Activate Driver'}
+                        {selectedDriver.status === 'ACTIVE' ? 'Deactivate Driver' : 'Activate Driver'}
                       </QuickActionButton>
-                      <QuickActionButton onClick={() => void updateDriver(selectedDriver.id, { availabilityStatus: 'AVAILABLE' })}>
-                        Mark Available
-                      </QuickActionButton>
-                      <QuickActionButton onClick={() => void updateDriver(selectedDriver.id, { availabilityStatus: 'BUSY' })}>
-                        Mark Busy
-                      </QuickActionButton>
-                      <QuickActionButton onClick={() => void runDriverAction('off-duty', selectedDriver)}>Mark Off Duty</QuickActionButton>
                       <QuickActionButton tone="danger" onClick={() => void runDriverAction('remove', selectedDriver)}>
                         Remove Driver
                       </QuickActionButton>
@@ -412,37 +427,40 @@ export function DriverManagementTable({ drivers, bookings = [] }: { drivers: Ser
                   {editingDriver.id ? 'Edit Driver' : 'Add Driver'}
                 </h3>
                 <p className="mt-1 text-sm text-zinc-500">
-                  {editingDriver.id ? 'Update driver profile and availability details.' : 'Add a new internal driver to the fleet.'}
+                  {editingDriver.id ? 'Update driver profile and account status.' : 'Add a new driver account. Duty status is controlled from the driver app.'}
                 </p>
               </div>
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <Input label="Full Name" value={editingDriver.name} onChange={(value) => setEditingDriver({ ...editingDriver, name: value })} />
+              <Input label="Full Name" value={editingDriver.fullName} onChange={(value) => setEditingDriver({ ...editingDriver, fullName: value })} />
               <Input label="Phone" value={editingDriver.phone} onChange={(value) => setEditingDriver({ ...editingDriver, phone: value })} />
               <Input label="Email" value={editingDriver.email} onChange={(value) => setEditingDriver({ ...editingDriver, email: value })} />
-              {editingDriver.id ? (
-                <Select
-                  label="Availability"
-                  value={editingDriver.availabilityStatus || 'OFFLINE'}
-                  onChange={(value) => setEditingDriver({ ...editingDriver, availabilityStatus: value as DriverFormState['availabilityStatus'] })}
-                  options={[
-                    ['AVAILABLE', 'Available'],
-                    ['BUSY', 'Busy'],
-                    ['OFFLINE', 'Offline'],
-                  ]}
-                />
-              ) : null}
+              <Input
+                label={editingDriver.id ? 'New Password (optional)' : 'Password'}
+                value={editingDriver.password}
+                onChange={(value) => setEditingDriver({ ...editingDriver, password: value })}
+              />
+              <Select
+                label="Status"
+                value={editingDriver.status}
+                onChange={(value) => setEditingDriver({ ...editingDriver, status: value as DriverFormState['status'] })}
+                options={[
+                  ['ACTIVE', 'Active'],
+                  ['INACTIVE', 'Inactive'],
+                  ['SUSPENDED', 'Suspended'],
+                ]}
+              />
+              <Select
+                label="Driver Type"
+                value={editingDriver.driverType}
+                onChange={(value) => setEditingDriver({ ...editingDriver, driverType: value as DriverFormState['driverType'] })}
+                options={[
+                  ['OWN_DRIVER', 'Own Driver'],
+                  ['VENDOR_DRIVER', 'Vendor Driver'],
+                ]}
+              />
               <Input label="License Info" value={editingDriver.licenseInfo} onChange={(value) => setEditingDriver({ ...editingDriver, licenseInfo: value })} />
-              <label className="md:col-span-2">
-                <span className="mb-2 block text-sm font-medium text-zinc-200">Notes</span>
-                <textarea
-                  rows={4}
-                  value={editingDriver.notes}
-                  onChange={(event) => setEditingDriver({ ...editingDriver, notes: event.target.value })}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
-              </label>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -581,7 +599,7 @@ function getDriverInitials(name: string) {
 
 
 function getDriverVisualStatus(driver: SerializedDriver, bookings: SerializedBooking[] = []) {
-  if (!driver.isActive) {
+  if (driver.status !== 'ACTIVE') {
     return 'OFF_DUTY';
   }
 
@@ -593,8 +611,12 @@ function getDriverVisualStatus(driver: SerializedDriver, bookings: SerializedBoo
     return 'ASSIGNED';
   }
 
-  if (driver.availabilityStatus === 'AVAILABLE') {
+  if (driver.dutyStatus === 'ONLINE') {
     return 'AVAILABLE';
+  }
+
+  if (driver.dutyStatus === 'ON_TRIP') {
+    return 'ON_TRIP';
   }
 
   return 'OFF_DUTY';
@@ -618,6 +640,14 @@ function formatDateTime(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatDutyStatus(value: string) {
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -648,17 +678,20 @@ function Select({
   return (
     <label>
       <span className="mb-2 block text-sm font-medium text-zinc-200">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
-      >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
+      <span className="relative block">
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full appearance-none rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pl-4 pr-10 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+        >
+          {options.map(([optionValue, optionLabel]) => (
+            <option key={optionValue} value={optionValue}>
+              {optionLabel}
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">▼</span>
+      </span>
     </label>
   );
 }

@@ -83,6 +83,7 @@ export function getAdminPermissions(role: string): PermissionKey[] {
 export type PagePermissionMap = {
   dashboard: PermissionKey[];
   dispatch: PermissionKey[];
+  'service-control': PermissionKey[];
   bookings: PermissionKey[];
   drivers: PermissionKey[];
   fleet: PermissionKey[];
@@ -96,6 +97,7 @@ export type PagePermissionMap = {
 export const PAGE_PERMISSIONS: PagePermissionMap = {
   dashboard: ['bookings:read'],
   dispatch: ['dispatch:read'],
+  'service-control': ['dispatch:read'],
   bookings: ['bookings:read'],
   drivers: ['drivers:read'],
   fleet: ['fleet:read'],

@@ -17,15 +17,24 @@ export type FixedRoutePrice = {
   dropoffCity: string;
   sedanPrice: number;
   suvMarkup?: number;
+  premiumPrice?: number | null;
   routeId?: string | null;
   priceSource?: 'override' | 'route' | 'coordinate' | 'static' | 'calculated';
+  pricingSource?: 'TRIP_OVERRIDE' | 'PRICING_ENGINE';
   tripOverrideId?: string | null;
   overrideDebug?: TripOverrideDebugInfo;
+  pricingDistanceKm?: number | null;
+  oneWayDistanceKm?: number | null;
+  durationMinutes?: number | null;
+  pricingBreakdown?: unknown;
+  routeType?: 'ONE_WAY' | 'ROUND_TRIP';
   serviceability?: {
     status: 'available' | 'manual_confirmation' | 'unavailable';
     message: string | null;
     code?: string;
     zoneCity?: string | null;
+    pickupZoneCity?: string | null;
+    dropoffZoneCity?: string | null;
   };
 };
 

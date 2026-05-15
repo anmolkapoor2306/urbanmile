@@ -1,13 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AdminPanel, adminInputClassName, adminSecondaryButtonClassName } from '@/components/admin/AdminLayout';
 import type { SerializedBooking } from '@/lib/bookingRecord';
 import type { SerializedDriver } from '@/lib/driverRecord';
 import { getDriverTypeLabel } from '@/lib/dispatch';
-import { isBookingDispatchableByZone, type SerializedOperationalZone } from '@/lib/operationalZoneRules';
+import { isBookingDispatchableByZone, type SerializedOperationalZone, type SerializedServiceControlConfig } from '@/lib/operationalZoneRules';
 import { buildGoogleMapsRouteUrl, formatCoordinatePair } from '@/lib/maps';
 import { getBookingDisplayAssignee } from '@/lib/opsDashboard';
 import { cn, getCarTypeDisplay } from '@/lib/utils';
@@ -18,10 +17,12 @@ export function DispatchBoard({
   drivers,
   bookings,
   operationalZones,
+  serviceConfig,
 }: {
   drivers: SerializedDriver[];
   bookings: SerializedBooking[];
   operationalZones: SerializedOperationalZone[];
+  serviceConfig?: SerializedServiceControlConfig;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -37,10 +38,10 @@ export function DispatchBoard({
     () =>
       bookings
         .filter((booking) => booking.status === 'NEEDS_ASSIGNMENT' && !booking.driverId && !booking.vendorId && !booking.manualDriverName)
-        .filter((booking) => isBookingDispatchableByZone(operationalZones, booking))
+        .filter((booking) => isBookingDispatchableByZone(operationalZones, booking, serviceConfig))
         .filter((booking) => matchesQueueFilter(booking, filter))
         .sort((a, b) => +new Date(a.pickupDateTime) - +new Date(b.pickupDateTime)),
-    [bookings, filter, operationalZones]
+    [bookings, filter, operationalZones, serviceConfig]
   );
 
   const selectedBooking = selectedBookingId
@@ -118,12 +119,6 @@ export function DispatchBoard({
             Assign controlled drivers, avoid conflicts, and move trips through the live workflow.
           </p>
         </div>
-        <Link
-          href="/admin/dispatch/operations"
-          className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-bold text-zinc-800 transition-colors hover:border-zinc-950 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-500 dark:hover:bg-zinc-900"
-        >
-          Operations Control
-        </Link>
       </div>
 
       {message ? (
@@ -497,10 +492,10 @@ function getDriverDisabledReason(
   assignedTrip: SerializedBooking | null,
   hasConflict: boolean
 ) {
-  if (!driver.isActive || driver.availabilityStatus === 'OFFLINE') return 'Off duty';
+  if (driver.status !== 'ACTIVE') return 'Inactive';
+  if (driver.dutyStatus !== 'ONLINE') return driver.dutyStatus === 'ON_TRIP' ? 'On trip' : 'Off duty';
   if (activeTrip) return 'On trip';
   if (assignedTrip) return 'Already assigned';
-  if (driver.availabilityStatus !== 'AVAILABLE') return 'Not available';
   if (hasConflict) return 'Pickup conflict';
   return null;
 }
@@ -524,15 +519,26 @@ function findNextBookingForDriver(bookings: SerializedBooking[], driverId: strin
 }
 
 function driverStatusLabel(driver: SerializedDriver) {
-  if (!driver.isActive || driver.availabilityStatus === 'OFFLINE') return 'Off Duty';
-  if (driver.availabilityStatus === 'BUSY') return 'Assigned';
-  return 'Available';
+  if (driver.status !== 'ACTIVE') return toTitleLabel(driver.status);
+  if (driver.dutyStatus === 'ONLINE') return 'Online';
+  if (driver.dutyStatus === 'ON_TRIP') return 'On Trip';
+  if (driver.dutyStatus === 'BREAK') return 'Break';
+  return 'Offline';
 }
 
 function driverStatusClass(driver: SerializedDriver) {
-  if (!driver.isActive || driver.availabilityStatus === 'OFFLINE') return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
-  if (driver.availabilityStatus === 'BUSY') return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100';
+  if (driver.status !== 'ACTIVE' || driver.dutyStatus === 'OFFLINE') return 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
+  if (driver.dutyStatus === 'ON_TRIP') return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100';
+  if (driver.dutyStatus === 'BREAK') return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100';
   return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100';
+}
+
+function toTitleLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function isSameCalendarDay(left: Date, right: Date) {

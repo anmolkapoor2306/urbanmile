@@ -1,7 +1,6 @@
 import prisma from '@/lib/prisma';
 import {
   getTripOverridePrice,
-  normalizeCityName,
   sanitizeTripOverride,
   sanitizeTripOverrides,
   type TripOverride,
@@ -12,9 +11,9 @@ type TripOverrideRecord = {
   fromCity: string;
   toCity: string;
   sedanPrice: unknown;
-  milesXlMarkup: unknown;
-  milesXlMarkupType: string;
-  reverseRoute: boolean;
+  suvPrice: unknown;
+  premiumPrice: unknown;
+  reverseRouteEnabled: boolean;
   active: boolean;
 };
 
@@ -60,12 +59,10 @@ export async function writeTripOverrides(value: unknown): Promise<TripOverride[]
           id: override.id,
           fromCity: override.fromCity,
           toCity: override.toCity,
-          normalizedFromCity: normalizeCityName(override.fromCity),
-          normalizedToCity: normalizeCityName(override.toCity),
-          sedanPrice: getTripOverridePrice(override.fixedPrice),
-          milesXlMarkup: getTripOverridePrice(override.milesXlMarkupValue),
-          milesXlMarkupType: override.milesXlMarkupType,
-          reverseRoute: override.includeReverse,
+          sedanPrice: getTripOverridePrice(override.sedanPrice),
+          suvPrice: nullablePrice(override.suvPrice),
+          premiumPrice: nullablePrice(override.premiumPrice),
+          reverseRouteEnabled: override.reverseRouteEnabled,
           active: override.isActive,
         })),
       });
@@ -88,10 +85,10 @@ function tripOverrideFromDb(record: TripOverrideRecord) {
     id: record.id,
     fromCity: record.fromCity,
     toCity: record.toCity,
-    fixedPrice: decimalToString(record.sedanPrice),
-    milesXlMarkupType: record.milesXlMarkupType,
-    milesXlMarkupValue: decimalToString(record.milesXlMarkup),
-    includeReverse: record.reverseRoute,
+    sedanPrice: decimalToString(record.sedanPrice),
+    suvPrice: decimalToString(record.suvPrice),
+    premiumPrice: decimalToString(record.premiumPrice),
+    reverseRouteEnabled: record.reverseRouteEnabled,
     isActive: record.active,
   });
 }
@@ -109,12 +106,17 @@ function toLogPayload(override: TripOverride) {
     id: override.id,
     fromCity: override.fromCity,
     toCity: override.toCity,
-    sedanPrice: override.fixedPrice,
-    milesXlMarkup: override.milesXlMarkupValue,
-    milesXlMarkupType: override.milesXlMarkupType,
-    reverseRoute: override.includeReverse,
+    sedanPrice: override.sedanPrice,
+    suvPrice: override.suvPrice,
+    premiumPrice: override.premiumPrice,
+    reverseRouteEnabled: override.reverseRouteEnabled,
     active: override.isActive,
   };
+}
+
+function nullablePrice(value: unknown) {
+  const price = getTripOverridePrice(value);
+  return price > 0 ? price : null;
 }
 
 function serializeErrorForLogs(error: unknown) {

@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "UrbanMiles Driver",
+    "slug": "urbanmiles-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "urbanmilesdriver",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "UrbanMiles Driver uses your location to show your current position on the operations map."
+      }
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    }
+  }
+}

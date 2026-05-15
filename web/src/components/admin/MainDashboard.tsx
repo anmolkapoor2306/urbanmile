@@ -1259,7 +1259,7 @@ function isDriverAvailableForBooking(
   bookings: SerializedBooking[],
   targetBooking: SerializedBooking
 ) {
-  if (!driver.isActive || driver.availabilityStatus !== 'AVAILABLE') return false;
+  if (driver.status !== 'ACTIVE' || driver.dutyStatus !== 'ONLINE') return false;
 
   const target = new Date(targetBooking.pickupDateTime).getTime();
   const conflictWindowMs = 4 * 60 * 60 * 1000;

@@ -20,14 +20,11 @@ import {
   bookingLocationMetadataSchema,
   toPrismaBookingLocationSource,
 } from '@/lib/bookingLocation';
+import { isRouteServiceable } from '@/lib/operationalZones';
+import { getPricingConfig } from '@/lib/pricingConfig';
+import { PricingEngineError, calculateFare, normalizePricingRouteType, normalizePricingVehicleType } from '@/lib/pricingEngine';
 import { readTripOverrides } from '@/lib/tripOverrideStore';
-import {
-  createTripOverrideDebugInfo,
-  getTripOverrideSedanPrice,
-  logTripOverrideDebug,
-  matchTripOverride,
-} from '@/lib/tripOverrides';
-import { isPickupServiceable } from '@/lib/operationalZones';
+import { getTripOverrideVehiclePrice, matchTripOverride } from '@/lib/tripOverrides';
 
 const publicBookingSelect = {
   publicBookingId: true,
@@ -74,6 +71,8 @@ const bookingSchema = z.object({
     message: 'Miles XL is coming soon. Please book Miles Eco for now.',
   }),
   fareAmount: z.number().positive().optional(),
+  distanceKm: z.number().finite().positive().nullable().optional(),
+  durationMinutes: z.number().finite().positive().nullable().optional(),
   specialInstructions: z.string().optional(),
   pickupLatitude: bookingLocationMetadataSchema.shape.latitude,
   pickupLongitude: bookingLocationMetadataSchema.shape.longitude,
@@ -114,7 +113,7 @@ export async function POST(request: NextRequest) {
       returnPickupDateTime,
       bookingMode,
       carType,
-      fareAmount,
+      distanceKm,
       specialInstructions,
       pickupLatitude,
       pickupLongitude,
@@ -151,17 +150,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const serviceability = await isPickupServiceable(
-      prisma,
+    const serviceability = await isRouteServiceable(prisma, {
       pickupLocation,
       pickupLatitude,
       pickupLongitude,
+      dropoffLocation,
+      dropoffLatitude,
+      dropoffLongitude,
       carType,
       bookingMode,
-      dropoffLocation
-    );
+    });
 
-    if (!serviceability.serviceable) {
+    if (!serviceability.ok) {
       return NextResponse.json(
         { success: false, error: serviceability.message, code: serviceability.code },
         { status: 400 }
@@ -202,25 +202,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const oneWayDistanceKm =
+      distanceKm ??
+      getCoordinateDistanceKm(pickupLatitude, pickupLongitude, dropoffLatitude, dropoffLongitude);
+
+    if (!oneWayDistanceKm || oneWayDistanceKm <= 0) {
+      return NextResponse.json(
+        { success: false, error: 'Unable to calculate fare for this trip.' },
+        { status: 400 }
+      );
+    }
+
     const tripOverrides = await readTripOverrides();
-    const tripOverrideMatch = matchTripOverride(
-      tripOverrides,
-      pickupLocation,
-      dropoffLocation
-    );
-    const tripOverrideFare = tripOverrideMatch
-      ? getTripOverrideSedanPrice(tripOverrideMatch.override)
+    const overrideMatch = matchTripOverride(tripOverrides, pickupLocation, dropoffLocation);
+    const overrideFare = overrideMatch ? getTripOverrideVehiclePrice(overrideMatch.override, carType) : null;
+    const pricingSource = overrideFare !== null ? 'TRIP_OVERRIDE' as const : 'PRICING_ENGINE' as const;
+    const pricingConfig = overrideFare === null ? await getPricingConfig() : null;
+    const fare = pricingConfig
+      ? calculateFare({
+          vehicleType: normalizePricingVehicleType(carType),
+          routeType: normalizePricingRouteType(bookingMode ?? 'ONE_WAY'),
+          distanceKm: oneWayDistanceKm,
+          config: pricingConfig,
+        })
       : null;
-    logTripOverrideDebug(
-      'server booking save',
-      createTripOverrideDebugInfo({
-        overrides: tripOverrides,
-        pickupAddress: pickupLocation,
-        dropoffAddress: dropoffLocation,
-        match: tripOverrideMatch,
-        finalFareSource: tripOverrideFare !== null ? 'override' : 'calculated',
-      })
-    );
+    const totalFare = overrideFare ?? fare?.finalFare ?? null;
+
+    if (totalFare === null) {
+      return NextResponse.json(
+        { success: false, error: 'Unable to calculate fare for this trip.' },
+        { status: 400 }
+      );
+    }
+
+    const calculatedLegPrice = isRoundTrip ? totalFare / 2 : totalFare;
 
     const bookings = await prisma.$transaction(async (tx) => {
       const normalizedPhone = normalizeCustomerPhone(bookingPhone);
@@ -277,7 +292,7 @@ export async function POST(request: NextRequest) {
       const baseId = crypto.randomUUID();
       const baseReference = createBookingReference(baseId, pickupAt);
       const basePublicBookingId = await createBasePublicBookingId(tx, pickupAt);
-      const legPrice = tripOverrideFare ?? fareAmount ?? null;
+      const legPrice = calculatedLegPrice;
       const commonData = {
         bookingType,
         fullName: bookingFullName,
@@ -286,10 +301,11 @@ export async function POST(request: NextRequest) {
         customerId: customer.id,
         carType,
         fareAmount: legPrice,
+        pricingSource,
         specialInstructions: specialInstructions || null,
         status: 'NEEDS_ASSIGNMENT' as const,
         confirmedAt: manualConfirmationRequired ? null : new Date(),
-        internalNotes: manualConfirmationRequired ? 'Manual confirmation required by Operations Control.' : null,
+        internalNotes: manualConfirmationRequired ? 'Manual confirmation required by Service Control.' : null,
       };
 
       const buildLegacyData = ({
@@ -400,6 +416,13 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof PricingEngineError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 400 }
+      );
+    }
+
     if (error instanceof PublicBookingError) {
       const status = error.code === 'BOOKING_RATE_LIMITED' ? 429 : 400;
       return NextResponse.json(
@@ -434,6 +457,40 @@ function getApiErrorResponse() {
     success: false,
     error: 'BOOKING_CREATE_FAILED',
   };
+}
+
+function getCoordinateDistanceKm(
+  pickupLatitude: number | null | undefined,
+  pickupLongitude: number | null | undefined,
+  dropoffLatitude: number | null | undefined,
+  dropoffLongitude: number | null | undefined
+) {
+  if (
+    typeof pickupLatitude !== 'number' ||
+    typeof pickupLongitude !== 'number' ||
+    typeof dropoffLatitude !== 'number' ||
+    typeof dropoffLongitude !== 'number'
+  ) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const latitudeDelta = toRadians(dropoffLatitude - pickupLatitude);
+  const longitudeDelta = toRadians(dropoffLongitude - pickupLongitude);
+  const pickupLatRadians = toRadians(pickupLatitude);
+  const dropoffLatRadians = toRadians(dropoffLatitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2) +
+    Math.cos(pickupLatRadians) *
+      Math.cos(dropoffLatRadians) *
+      Math.sin(longitudeDelta / 2) *
+      Math.sin(longitudeDelta / 2);
+
+  return Number((earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)) * 1.25).toFixed(1));
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
 }
 
 function serializePublicBooking(booking: {

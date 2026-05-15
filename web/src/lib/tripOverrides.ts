@@ -1,13 +1,11 @@
-export type TripOverrideMarkupType = 'percentage' | 'flat';
-
 export type TripOverride = {
   id: string;
   fromCity: string;
   toCity: string;
-  fixedPrice: string;
-  milesXlMarkupType: TripOverrideMarkupType;
-  milesXlMarkupValue: string;
-  includeReverse: boolean;
+  sedanPrice: string;
+  suvPrice: string;
+  premiumPrice: string;
+  reverseRouteEnabled: boolean;
   isActive: boolean;
 };
 
@@ -27,7 +25,7 @@ export type TripOverrideDebugInfo = {
   dropoffCity: string | null;
   loadedOverrideCount: number;
   activeOverrideCount: number;
-  loadedOverrides: Array<Pick<TripOverride, 'id' | 'fromCity' | 'toCity' | 'fixedPrice' | 'milesXlMarkupType' | 'milesXlMarkupValue' | 'includeReverse' | 'isActive'>>;
+  loadedOverrides: Array<Pick<TripOverride, 'id' | 'fromCity' | 'toCity' | 'sedanPrice' | 'suvPrice' | 'premiumPrice' | 'reverseRouteEnabled' | 'isActive'>>;
   matchedOverrideId: string | null;
   matchedDirection: TripOverrideMatch['matchedDirection'] | null;
   finalFareSource: 'override' | 'calculated';
@@ -68,7 +66,7 @@ export function sanitizeTripOverride(value: unknown): TripOverride | null {
     !record.id ||
     !normalizeCityName(draft.fromCity) ||
     !normalizeCityName(draft.toCity) ||
-    getTripOverridePrice(draft.fixedPrice) <= 0
+    getTripOverridePrice(draft.sedanPrice) <= 0
   ) {
     return null;
   }
@@ -82,26 +80,25 @@ export function sanitizeTripOverride(value: unknown): TripOverride | null {
 export function sanitizeTripOverrideDraft(value: Partial<TripOverrideDraft>): TripOverrideDraft {
   const legacyValue = value as Partial<TripOverrideDraft> & {
     basePrice?: unknown;
+    fixedPrice?: unknown;
     sedanPrice?: unknown;
-    milesXlMarkup?: unknown;
-    vehicleMarkupType?: unknown;
-    vehicleMarkupValue?: unknown;
+    suvPrice?: unknown;
+    premiumPrice?: unknown;
     reverseRoute?: boolean;
+    reverseRouteEnabled?: boolean;
     active?: boolean;
+    includeReverse?: boolean;
+    isActive?: boolean;
   };
 
   return {
     fromCity: formatTripOverrideCityName(value.fromCity),
     toCity: formatTripOverrideCityName(value.toCity),
-    fixedPrice: sanitizeNumericInputDraft(value.fixedPrice ?? legacyValue.sedanPrice ?? legacyValue.basePrice),
-    milesXlMarkupType: normalizeTripOverrideMarkupType(
-      value.milesXlMarkupType ?? legacyValue.vehicleMarkupType
-    ),
-    milesXlMarkupValue:
-      sanitizeNumericInputDraft(
-        value.milesXlMarkupValue ?? legacyValue.milesXlMarkup ?? legacyValue.vehicleMarkupValue
-      ) || '0',
-    includeReverse: value.includeReverse ?? legacyValue.reverseRoute ?? true,
+    sedanPrice: sanitizeNumericInputDraft(value.sedanPrice ?? legacyValue.fixedPrice ?? legacyValue.basePrice),
+    suvPrice: sanitizeNumericInputDraft(value.suvPrice),
+    premiumPrice: sanitizeNumericInputDraft(value.premiumPrice),
+    reverseRouteEnabled:
+      value.reverseRouteEnabled ?? legacyValue.includeReverse ?? legacyValue.reverseRoute ?? true,
     isActive: value.isActive ?? legacyValue.active ?? true,
   };
 }
@@ -169,7 +166,7 @@ export function matchTripOverride(
   for (const override of overrides) {
     if (
       !override.isActive ||
-      getTripOverridePrice(override.fixedPrice) <= 0
+      getTripOverridePrice(override.sedanPrice) <= 0
     ) {
       continue;
     }
@@ -186,7 +183,7 @@ export function matchTripOverride(
       };
     }
 
-    if (!override.includeReverse) {
+    if (!override.reverseRouteEnabled) {
       continue;
     }
 
@@ -249,10 +246,10 @@ export function createTripOverrideDebugInfo({
       id: override.id,
       fromCity: override.fromCity,
       toCity: override.toCity,
-      fixedPrice: override.fixedPrice,
-      milesXlMarkupType: override.milesXlMarkupType,
-      milesXlMarkupValue: override.milesXlMarkupValue,
-      includeReverse: override.includeReverse,
+      sedanPrice: override.sedanPrice,
+      suvPrice: override.suvPrice,
+      premiumPrice: override.premiumPrice,
+      reverseRouteEnabled: override.reverseRouteEnabled,
       isActive: override.isActive,
     })),
     matchedOverrideId: match?.override.id ?? null,
@@ -295,37 +292,19 @@ export function getTripOverridePrice(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function getTripOverrideSedanPrice(override: Pick<TripOverride, 'fixedPrice'>) {
-  return getTripOverridePrice(override.fixedPrice);
-}
-
-export function calculateTripOverrideMilesXlPrice(override: TripOverride) {
-  const sedanPrice = getTripOverrideSedanPrice(override);
-  const markup = getTripOverridePrice(override.milesXlMarkupValue);
-  const finalPrice =
-    override.milesXlMarkupType === 'percentage'
-      ? sedanPrice + (sedanPrice * markup) / 100
-      : sedanPrice + markup;
-
-  return roundCurrency(Math.max(0, finalPrice));
-}
-
-export function getTripOverrideMilesXlMarkupAmount(override: TripOverride) {
-  return roundCurrency(Math.max(0, calculateTripOverrideMilesXlPrice(override) - getTripOverrideSedanPrice(override)));
-}
-
-export function formatTripOverrideMilesXlMarkup(override: Pick<TripOverride, 'milesXlMarkupType' | 'milesXlMarkupValue'>) {
-  const markup = getTripOverridePrice(override.milesXlMarkupValue);
-
-  if (override.milesXlMarkupType === 'percentage') {
-    return `${formatCompactNumber(markup)}%`;
-  }
-
-  return `₹${formatCompactNumber(markup)}`;
-}
-
-function normalizeTripOverrideMarkupType(value: unknown): TripOverrideMarkupType {
-  return value === 'flat' ? 'flat' : 'percentage';
+export function getTripOverrideVehiclePrice(
+  override: TripOverride,
+  vehicleType: string
+): number | null {
+  const normalizedVehicleType = vehicleType.toUpperCase().trim();
+  const price =
+    normalizedVehicleType === 'SUV' || normalizedVehicleType === 'VAN'
+      ? override.suvPrice
+      : normalizedVehicleType === 'PREMIUM' || normalizedVehicleType === 'LUXURY'
+        ? override.premiumPrice
+        : override.sedanPrice;
+  const parsedPrice = getTripOverridePrice(price);
+  return parsedPrice > 0 ? roundCurrency(parsedPrice) : null;
 }
 
 function normalizeAddressText(value: string) {
@@ -383,7 +362,7 @@ function toTitleCaseCity(value: string) {
     .join(' ');
 }
 
-function getTripOverridePairKeys(override: Pick<TripOverride, 'fromCity' | 'toCity' | 'includeReverse'>) {
+function getTripOverridePairKeys(override: Pick<TripOverride, 'fromCity' | 'toCity' | 'reverseRouteEnabled'>) {
   const fromCity = normalizeCityName(override.fromCity);
   const toCity = normalizeCityName(override.toCity);
 
@@ -392,7 +371,7 @@ function getTripOverridePairKeys(override: Pick<TripOverride, 'fromCity' | 'toCi
   }
 
   const pairs = [createTripOverridePairKey(fromCity, toCity)];
-  if (override.includeReverse) {
+  if (override.reverseRouteEnabled) {
     pairs.push(createTripOverridePairKey(toCity, fromCity));
   }
 
@@ -409,12 +388,6 @@ function sanitizeNumericInputDraft(value: unknown) {
   }
 
   return String(value).trim();
-}
-
-function formatCompactNumber(value: number) {
-  return new Intl.NumberFormat('en-IN', {
-    maximumFractionDigits: 2,
-  }).format(getTripOverridePrice(value));
 }
 
 function roundCurrency(value: number) {

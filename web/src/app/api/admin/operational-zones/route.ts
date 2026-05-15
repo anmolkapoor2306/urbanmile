@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
-import type { BookingStatus } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '@/lib/prisma';
 import { requireAdminAuth } from '@/lib/adminAuth';
 import { hasPermission } from '@/lib/authPermissions';
 import {
+  getServiceControlConfig,
   getOperationalZones,
   operationalZoneSelect,
   serializeOperationalZone,
@@ -15,8 +15,10 @@ export const dynamic = 'force-dynamic';
 
 const zoneSchema = z.object({
   city: z.string().trim().min(2, 'City name is required'),
+  centerLat: z.number().finite('Please select a valid city from suggestions.'),
+  centerLng: z.number().finite('Please select a valid city from suggestions.'),
   status: z.enum(['ENABLED', 'LIMITED', 'DISABLED']),
-  serviceRadiusKm: z.coerce.number().int().min(1, 'Service radius must be at least 1 km').max(500, 'Service radius cannot exceed 500 km'),
+  serviceRadiusKm: z.coerce.number().int().min(5, 'Service radius must be at least 5 km').max(300, 'Service radius cannot exceed 300 km'),
   airportEnabled: z.boolean(),
   outstationEnabled: z.boolean(),
   autoDispatchEnabled: z.boolean(),
@@ -30,9 +32,9 @@ const updateZoneSchema = zoneSchema.partial().extend({
 const deleteZoneSchema = z.object({
   id: z.string().uuid(),
 });
-
-const activeOrFutureBookingStatuses: BookingStatus[] = ['NEEDS_ASSIGNMENT', 'ASSIGNED', 'ACTIVE'];
-const zoneHasBookingsMessage = 'This zone has active or future bookings. Disable the zone instead.';
+const configSchema = z.object({
+  allowIndiaWideBooking: z.boolean(),
+});
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdminAuth(request);
@@ -41,10 +43,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const zones = await getOperationalZones(prisma);
-    return NextResponse.json({ success: true, data: zones }, { headers: { 'Cache-Control': 'no-store' } });
+    const config = await getServiceControlConfig(prisma);
+    return NextResponse.json({ success: true, data: zones, config }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    console.error('Load operational zones error:', error);
-    return NextResponse.json({ error: 'Could not load operational zones.' }, { status: 500 });
+    console.error('Load service areas error:', error);
+    return NextResponse.json({ error: 'Could not load service areas.' }, { status: 500 });
   }
 }
 
@@ -61,23 +64,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
-    const existingZone = await prisma.operationalZone.findFirst({
+    const existingZone = await prisma.serviceArea.findFirst({
       where: { city: { equals: parsed.data.city, mode: 'insensitive' } },
       select: { id: true },
     });
 
     if (existingZone) {
-      return NextResponse.json({ error: 'An operational zone for this city already exists.' }, { status: 409 });
+      return NextResponse.json({ error: 'A service area for this city already exists.' }, { status: 409 });
     }
 
-    const zone = await prisma.operationalZone.create({
+    const zone = await prisma.serviceArea.create({
       data: parsed.data,
       select: operationalZoneSelect,
     });
 
-    return NextResponse.json({ success: true, message: 'Operational zone created.', data: serializeOperationalZone(zone) }, { status: 201 });
+    return NextResponse.json({ success: true, message: 'Service area created.', data: serializeOperationalZone(zone) }, { status: 201 });
   } catch (error) {
-    console.error('Create operational zone error:', error);
+    console.error('Create service area error:', error);
     return NextResponse.json({ error: getZoneMutationError(error, 'create') }, { status: getZoneMutationStatus(error) });
   }
 }
@@ -97,7 +100,7 @@ export async function PATCH(request: NextRequest) {
 
     const { id, ...data } = parsed.data;
     if (data.city) {
-      const existingZone = await prisma.operationalZone.findFirst({
+      const existingZone = await prisma.serviceArea.findFirst({
         where: {
           city: { equals: data.city, mode: 'insensitive' },
           id: { not: id },
@@ -106,19 +109,19 @@ export async function PATCH(request: NextRequest) {
       });
 
       if (existingZone) {
-        return NextResponse.json({ error: 'An operational zone for this city already exists.' }, { status: 409 });
+        return NextResponse.json({ error: 'A service area for this city already exists.' }, { status: 409 });
       }
     }
 
-    const zone = await prisma.operationalZone.update({
+    const zone = await prisma.serviceArea.update({
       where: { id },
       data,
       select: operationalZoneSelect,
     });
 
-    return NextResponse.json({ success: true, message: 'Operational zone updated.', data: serializeOperationalZone(zone) });
+    return NextResponse.json({ success: true, message: 'Service area updated.', data: serializeOperationalZone(zone) });
   } catch (error) {
-    console.error('Update operational zone error:', error);
+    console.error('Update service area error:', error);
     return NextResponse.json({ error: getZoneMutationError(error, 'update') }, { status: getZoneMutationStatus(error) });
   }
 }
@@ -136,41 +139,53 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(', ') }, { status: 400 });
     }
 
-    const zone = await prisma.operationalZone.findUnique({
+    const zone = await prisma.serviceArea.findUnique({
       where: { id: parsed.data.id },
       select: { id: true, city: true },
     });
 
     if (!zone) {
-      return NextResponse.json({ error: 'Operational zone not found.' }, { status: 404 });
+      return NextResponse.json({ error: 'Service area not found.' }, { status: 404 });
     }
 
-    const blockingBooking = await prisma.booking.findFirst({
-      where: {
-        pickupLocation: { contains: zone.city, mode: 'insensitive' },
-        OR: [
-          { status: { in: activeOrFutureBookingStatuses } },
-          {
-            pickupDateTime: { gte: new Date() },
-            status: { notIn: ['COMPLETE', 'CANCELLED'] },
-          },
-        ],
-      },
-      select: { id: true },
-    });
-
-    if (blockingBooking) {
-      return NextResponse.json({ error: zoneHasBookingsMessage }, { status: 409 });
-    }
-
-    await prisma.operationalZone.delete({
+    await prisma.serviceArea.delete({
       where: { id: zone.id },
     });
 
-    return NextResponse.json({ success: true, message: 'Operational zone deleted.', data: { id: zone.id } });
+    return NextResponse.json({ success: true, message: 'Service area deleted.', data: { id: zone.id } });
   } catch (error) {
-    console.error('Delete operational zone error:', error);
+    console.error('Delete service area error:', error);
     return NextResponse.json({ error: getZoneMutationError(error, 'delete') }, { status: getZoneMutationStatus(error) });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  const auth = await requireAdminAuth(request);
+  if ('status' in auth) return auth;
+  if (!hasPermission(auth.session.role, 'dispatch:write')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  try {
+    const body = await request.json();
+    const parsed = configSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid service control settings.' }, { status: 400 });
+    }
+
+    const config = await prisma.serviceControlConfig.upsert({
+      where: { singletonKey: 'default' },
+      update: { allowIndiaWideBooking: parsed.data.allowIndiaWideBooking },
+      create: {
+        singletonKey: 'default',
+        allowIndiaWideBooking: parsed.data.allowIndiaWideBooking,
+      },
+      select: { allowIndiaWideBooking: true },
+    });
+
+    return NextResponse.json({ success: true, message: 'Service control updated.', config });
+  } catch (error) {
+    console.error('Update service control config error:', error);
+    return NextResponse.json({ error: 'Could not update service control.' }, { status: 500 });
   }
 }
 
@@ -183,9 +198,9 @@ function getZoneMutationStatus(error: unknown) {
 
 function getZoneMutationError(error: unknown, action: 'create' | 'update' | 'delete') {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    if (error.code === 'P2002') return 'An operational zone for this city already exists.';
-    if (error.code === 'P2025') return 'Operational zone not found.';
-    if (error.code === 'P2022') return 'The operational zone database table is missing. Apply the latest migration and try again.';
+    if (error.code === 'P2002') return 'A service area for this city already exists.';
+    if (error.code === 'P2025') return 'Service area not found.';
+    if (error.code === 'P2022') return 'The service area database table is missing. Apply the latest migration and try again.';
   }
-  return `Could not ${action} operational zone.`;
+  return `Could not ${action} service area.`;
 }

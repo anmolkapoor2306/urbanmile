@@ -19,5 +19,6 @@ export default prisma;
 
 function hasRequiredPrismaDelegates(client: PrismaClient) {
   return typeof client.booking?.findMany === 'function' &&
-    typeof client.operationalZone?.findMany === 'function';
+    typeof client.serviceArea?.findMany === 'function' &&
+    typeof client.serviceControlConfig?.findUnique === 'function';
 }

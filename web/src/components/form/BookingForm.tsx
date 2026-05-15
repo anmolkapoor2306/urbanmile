@@ -3,6 +3,7 @@
 import { useState, FormEvent, useEffect, useId, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
   ArrowLeft,
   CalendarClock,
   Car,
@@ -12,6 +13,7 @@ import {
   Loader2,
   MapPin,
   Navigation,
+  PhoneCall,
   ShieldCheck,
   Users,
   X,
@@ -27,15 +29,7 @@ import {
   type FixedRoutePrice,
 } from '@/lib/fixedRoutePricing';
 import {
-  createTripOverrideDebugInfo,
-  getTripOverrideMilesXlMarkupAmount,
-  getTripOverrideSedanPrice,
-  logTripOverrideDebug,
-  matchTripOverride,
-  sanitizeTripOverrides,
-  type TripOverride,
   type TripOverrideDebugInfo,
-  type TripOverrideMatch,
 } from '@/lib/tripOverrides';
 import {
   cleanGeoapifyCityLocation,
@@ -50,7 +44,6 @@ import {
 const UNAVAILABLE_ROUTE_MESSAGE = 'Price not available for this route yet. Call support or try later.';
 const GOOGLE_BOOKING_DRAFT_KEY = 'urbanmiles_google_booking_draft';
 const RIDE_OPTIONS_DRAFT_KEY = 'urbanmiles_ride_options_draft';
-const TRIP_OVERRIDE_STORAGE_KEY = 'urbanmiles-pricing-engine-trip-overrides';
 const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY ?? '';
 const CITY_RESULT_TYPES = new Set(['city', 'county', 'state', 'postcode', 'district', 'suburb', 'locality']);
 const ACTIVE_CUSTOMER_RIDE = 'SEDAN' as const;
@@ -178,8 +171,15 @@ type PublicOutstationQuoteResponse = {
     routeId: string | null;
     sedanPrice: number | null;
     suvMarkup: number | null;
+    premiumPrice?: number | null;
+    pricingDistanceKm?: number | null;
+    oneWayDistanceKm?: number | null;
+    durationMinutes?: number | null;
+    pricingBreakdown?: unknown;
+    routeType?: 'ONE_WAY' | 'ROUND_TRIP';
     customPricingRequired: boolean;
     priceSource?: FixedRoutePrice['priceSource'];
+    pricingSource?: FixedRoutePrice['pricingSource'];
     tripOverrideId?: string | null;
     overrideDebug?: TripOverrideDebugInfo;
     serviceability?: FixedRoutePrice['serviceability'];
@@ -299,9 +299,9 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
   const [manualPinField, setManualPinField] = useState<LocationFieldName | null>(null);
 
   const finalPrice = priceQuote ? getRideFare(priceQuote, selectedRide) : 0;
-  const totalPrice = bookingMode === 'ROUND_TRIP' ? finalPrice * 2 : finalPrice;
+  const totalPrice = finalPrice;
   const returnDateTime = buildPickupDateTime(returnDate, returnTime);
-  const isRouteUnavailable = routeMessage === UNAVAILABLE_ROUTE_MESSAGE || routeMessage === PICKUP_UNSERVICEABLE_MESSAGE;
+  const hasRouteServiceWarning = Boolean(routeMessage);
   const activeLocationValue =
     activeLocationField === 'pickupLocation'
       ? pickupField.address
@@ -394,7 +394,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
       setPriceQuote(null);
       setRouteMessage(null);
       setIsRestoringRideOptions(true);
-      void getBookingRoutePriceQuote(restoredFormData)
+      void getBookingRoutePriceQuote(restoredFormData, parsed.bookingMode ?? 'ONE_WAY')
         .then((routeQuoteResult) => {
           if (routeQuoteResult.priceQuote) {
             setPriceQuote(routeQuoteResult.priceQuote);
@@ -1089,7 +1089,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
       return;
     }
 
-    const routeQuoteResult = await getBookingRoutePriceQuote(formData);
+    const routeQuoteResult = await getBookingRoutePriceQuote(formData, bookingMode);
     const fixedRoutePrice = routeQuoteResult.priceQuote;
 
     if (!fixedRoutePrice) {
@@ -1147,7 +1147,7 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
       return;
     }
 
-    const routeQuoteResult = await getBookingRoutePriceQuote(formData);
+    const routeQuoteResult = await getBookingRoutePriceQuote(formData, bookingMode);
     const fixedRoutePrice = routeQuoteResult.priceQuote;
 
     if (!fixedRoutePrice) {
@@ -1347,6 +1347,8 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
           pickupDateTime: new Date(result.data.pickupDateTime).toISOString(),
           carType: selectedRide,
           fareAmount: finalPrice,
+          distanceKm: priceQuote?.oneWayDistanceKm ?? null,
+          durationMinutes: priceQuote?.durationMinutes ?? null,
           specialInstructions: result.data.specialInstructions,
           pickupLatitude: result.data.pickupLatitude,
           pickupLongitude: result.data.pickupLongitude,
@@ -1743,41 +1745,22 @@ export function BookingForm({ onBookingSuccess, onReset, mode = 'search', initia
 
            </div>
 
-           {routeMessage && (
-            <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
-              {routeMessage}
-            </div>
-          )}
-
-          <div className="relative min-h-13 w-full">
+          <div className="w-full">
             <button
               type="submit"
               disabled={isSubmitting}
-              className={cn(
-                mainActionClassName,
-                'absolute inset-0',
-                isRouteUnavailable && 'pointer-events-none translate-y-1 opacity-0'
-              )}
-              tabIndex={isRouteUnavailable ? -1 : undefined}
+              className={mainActionClassName}
+              aria-disabled={isSubmitting}
             >
               {isSubmitting ? 'Checking...' : 'See Prices'}
             </button>
-            <a
-              href={CONTACT_PHONE_HREF}
-              className={cn(
-                mainActionClassName,
-                'absolute inset-0',
-                isRouteUnavailable ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
-              )}
-              tabIndex={isRouteUnavailable ? undefined : -1}
-              aria-label="Call UrbanMiles now"
-            >
-              Call Now
-            </a>
           </div>
         </div>
       )}
     </form>
+    {hasRouteServiceWarning && (
+      <ServiceAreaWarningModal onClose={() => setRouteMessage(null)} />
+    )}
     {manualPinField && (
       <ManualPinMapModal
         fieldLabel={manualPinField === 'pickupLocation' ? 'pickup' : 'dropoff'}
@@ -2772,6 +2755,73 @@ function RouteInfoItem({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ServiceAreaWarningModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="presentation"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-zinc-950/55 px-4 py-6 backdrop-blur-[2px] motion-safe:animate-[serviceWarningBackdropIn_180ms_ease-out]"
+      onClick={onClose}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="service-area-warning-title"
+        aria-describedby="service-area-warning-description"
+        className={cn(
+          'relative w-full max-w-md overflow-hidden rounded-[28px] border px-5 py-6 text-center shadow-2xl sm:px-6 sm:py-7',
+          'border-red-200 bg-white text-zinc-950 shadow-red-950/20',
+          'dark:border-red-500/35 dark:bg-zinc-950 dark:text-white dark:shadow-amber-950/30',
+          'motion-safe:animate-[serviceWarningModalIn_220ms_ease-out]'
+        )}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+          aria-label="Close service area warning"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+
+        <div className="mx-auto flex h-13 w-13 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-700 shadow-sm dark:border-amber-400/30 dark:bg-red-500/10 dark:text-amber-300">
+          <AlertTriangle className="h-6 w-6" aria-hidden="true" />
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <h3 id="service-area-warning-title" className="text-xl font-black leading-7 tracking-tight">
+            Sorry, this route is outside our service area.
+          </h3>
+          <p
+            id="service-area-warning-description"
+            className="text-sm font-semibold leading-6 text-zinc-600 dark:text-zinc-400"
+          >
+            Please choose another destination or contact us directly.
+          </p>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <a
+            href={CONTACT_PHONE_HREF}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-amber-400 px-5 text-sm font-black text-zinc-950 shadow-lg shadow-amber-950/15 transition-colors hover:bg-amber-300"
+            aria-label="Call UrbanMiles now"
+          >
+            <PhoneCall className="h-4 w-4" aria-hidden="true" />
+            Call Now
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-zinc-200 bg-white px-5 text-sm font-black text-zinc-800 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface BookingFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   icon?: 'pickup' | 'dropoff';
@@ -3150,26 +3200,31 @@ async function getRoutePriceQuote(
   pickupLocation: string,
   dropoffLocation: string,
   pickupLatitude?: number | null,
-  pickupLongitude?: number | null
+  pickupLongitude?: number | null,
+  dropoffLatitude?: number | null,
+  dropoffLongitude?: number | null,
+  routeType: BookingMode = 'ONE_WAY',
+  distanceKm?: number | null,
+  durationMinutes?: number | null
 ): Promise<RoutePriceQuoteResult> {
-  const publicOverrides = await loadPublicTripOverridesForPricing();
-  const clientOverrideMatch = matchTripOverride(publicOverrides, pickupLocation, dropoffLocation);
-  const clientOverrideDebug = createTripOverrideDebugInfo({
-    overrides: publicOverrides,
-    pickupAddress: pickupLocation,
-    dropoffAddress: dropoffLocation,
-    match: clientOverrideMatch,
-    finalFareSource: clientOverrideMatch ? 'override' : 'calculated',
-  });
-
-  logTripOverrideDebug('client preflight before fare display', clientOverrideDebug);
   let serverServiceability: FixedRoutePrice['serviceability'];
 
   try {
     const response = await fetch('/api/pricing/outstation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pickupLocation, dropoffLocation, pickupLatitude, pickupLongitude }),
+      body: JSON.stringify({
+        pickupLocation,
+        dropoffLocation,
+        pickupLatitude,
+        pickupLongitude,
+        dropoffLatitude,
+        dropoffLongitude,
+        routeType,
+        vehicleType: 'SEDAN',
+        distanceKm,
+        durationMinutes,
+      }),
     });
     const data = (await response.json()) as PublicOutstationQuoteResponse;
     const quote = data.data;
@@ -3192,22 +3247,25 @@ async function getRoutePriceQuote(
         dropoffCity: quote.dropoffCity ?? normalizeRouteLabel(dropoffLocation),
         sedanPrice: quote.sedanPrice,
         suvMarkup: quote.suvMarkup ?? 1000,
+        premiumPrice: quote.premiumPrice ?? null,
         routeId: quote.routeId,
-        priceSource: quote.priceSource ?? 'route',
+        priceSource: quote.priceSource ?? 'calculated',
+        pricingSource: quote.pricingSource,
         tripOverrideId: quote.tripOverrideId ?? null,
-        overrideDebug: quote.overrideDebug ?? clientOverrideDebug,
+        overrideDebug: quote.overrideDebug,
+        pricingDistanceKm: quote.pricingDistanceKm ?? null,
+        oneWayDistanceKm: quote.oneWayDistanceKm ?? distanceKm ?? null,
+        durationMinutes: quote.durationMinutes ?? durationMinutes ?? null,
+        pricingBreakdown: quote.pricingBreakdown,
+        routeType,
         serviceability: serverServiceability,
       };
-
-      if (clientOverrideMatch) {
-        return { priceQuote: buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug, serverServiceability) };
-      }
 
       console.info('[Trip Override] final customer fare source', serverQuote.priceSource ?? 'calculated');
       return { priceQuote: serverQuote };
     }
 
-    if (quote?.customPricingRequired && !clientOverrideMatch) {
+    if (quote?.customPricingRequired) {
       return { priceQuote: null, message: UNAVAILABLE_ROUTE_MESSAGE };
     }
   } catch (error) {
@@ -3215,111 +3273,25 @@ async function getRoutePriceQuote(
     return { priceQuote: null, message: PICKUP_UNSERVICEABLE_MESSAGE };
   }
 
-  if (clientOverrideMatch) {
-    return { priceQuote: buildTripOverridePriceQuote(clientOverrideMatch, clientOverrideDebug, serverServiceability) };
-  }
-
   return { priceQuote: null, message: UNAVAILABLE_ROUTE_MESSAGE };
 }
 
-function buildTripOverridePriceQuote(
-  match: TripOverrideMatch,
-  overrideDebug: TripOverrideDebugInfo,
-  serviceability?: FixedRoutePrice['serviceability']
-): FixedRoutePrice {
-  const sedanPrice = getTripOverrideSedanPrice(match.override);
-  const nextDebug: TripOverrideDebugInfo = {
-    ...overrideDebug,
-    matchedOverrideId: match.override.id,
-    matchedDirection: match.matchedDirection,
-    finalFareSource: 'override',
-  };
-
-  console.info('[Trip Override] final customer fare source', 'override');
-
-  return {
-    pickupCity: match.pickupCity,
-    dropoffCity: match.dropoffCity,
-    sedanPrice,
-    suvMarkup: getTripOverrideMilesXlMarkupAmount(match.override),
-    routeId: null,
-    priceSource: 'override',
-    tripOverrideId: match.override.id,
-    overrideDebug: nextDebug,
-    serviceability,
-  };
-}
-
-async function loadPublicTripOverridesForPricing(): Promise<TripOverride[]> {
-  let apiOverrides: TripOverride[] = [];
-
-  try {
-    const response = await fetch('/api/pricing/trip-overrides', { cache: 'no-store' });
-    const data = (await response.json()) as { data?: unknown; error?: string };
-
-    if (response.ok) {
-      apiOverrides = sanitizeTripOverrides(data.data);
-    } else {
-      console.info('[Trip Override] public overrides API error', data.error ?? response.statusText);
-    }
-  } catch (error) {
-    console.info('[Trip Override] public overrides API failed', error);
-  }
-
-  const browserOverrides = readBrowserTripOverrides();
-  const overrides = apiOverrides.length > 0 ? apiOverrides : browserOverrides;
-
-  console.info('[Trip Override] loaded overrides for customer pricing', {
-    source: apiOverrides.length > 0 ? '/api/pricing/trip-overrides' : 'localStorage fallback',
-    apiOverrideCount: apiOverrides.length,
-    browserOverrideCount: browserOverrides.length,
-    overrides,
-  });
-
-  return overrides;
-}
-
-function readBrowserTripOverrides() {
-  if (typeof window === 'undefined') {
-    return [];
-  }
-
-  try {
-    const storedTripOverrides = window.localStorage.getItem(TRIP_OVERRIDE_STORAGE_KEY);
-    return storedTripOverrides ? sanitizeTripOverrides(JSON.parse(storedTripOverrides)) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function getBookingRoutePriceQuote(formData: BookingFormData): Promise<RoutePriceQuoteResult> {
-  const coordinateQuote = getCoordinateFallbackPriceQuote(formData);
-  const hasManualPin =
-    formData.pickupLocationSource === 'manual_pin' ||
-    formData.dropoffLocationSource === 'manual_pin';
+async function getBookingRoutePriceQuote(
+  formData: BookingFormData,
+  bookingMode: BookingMode
+): Promise<RoutePriceQuoteResult> {
+  const routeEstimate = await getRouteEstimateForPricing(formData);
   const routeQuote = await getRoutePriceQuote(
     formData.pickupLocation,
     formData.dropoffLocation,
     formData.pickupLatitude,
-    formData.pickupLongitude
+    formData.pickupLongitude,
+    formData.dropoffLatitude,
+    formData.dropoffLongitude,
+    bookingMode,
+    routeEstimate?.distanceKm ?? null,
+    routeEstimate?.durationMinutes ?? null
   );
-
-  if (routeQuote.priceQuote?.priceSource === 'override') {
-    return routeQuote;
-  }
-
-  if (!routeQuote.priceQuote) {
-    return routeQuote;
-  }
-
-  if (hasManualPin && coordinateQuote) {
-    return {
-      priceQuote: {
-        ...coordinateQuote,
-        serviceability: routeQuote.priceQuote.serviceability,
-      },
-    };
-  }
 
   return routeQuote;
 }
@@ -3328,14 +3300,15 @@ function normalizeRouteLabel(value: string) {
   return value.trim().toLowerCase();
 }
 
-function getCoordinateFallbackPriceQuote(formData: BookingFormData): FixedRoutePrice | null {
+async function getRouteEstimateForPricing(formData: BookingFormData): Promise<{
+  distanceKm: number;
+  durationMinutes: number | null;
+} | null> {
   const {
     pickupLatitude,
     pickupLongitude,
     dropoffLatitude,
     dropoffLongitude,
-    pickupLocation,
-    dropoffLocation,
   } = formData;
 
   if (
@@ -3347,6 +3320,26 @@ function getCoordinateFallbackPriceQuote(formData: BookingFormData): FixedRouteP
     return null;
   }
 
+  try {
+    const response = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${pickupLongitude},${pickupLatitude};${dropoffLongitude},${dropoffLatitude}?overview=false`
+    );
+    const data = (await response.json()) as {
+      routes?: Array<{ distance?: number; duration?: number }>;
+    };
+    const route = response.ok ? data.routes?.[0] : null;
+
+    if (typeof route?.distance === 'number' && route.distance > 0) {
+      return {
+        distanceKm: Number((route.distance / 1000).toFixed(1)),
+        durationMinutes:
+          typeof route.duration === 'number' ? Math.max(1, Math.round(route.duration / 60)) : null,
+      };
+    }
+  } catch (error) {
+    console.info('[Pricing Engine] OSRM distance failed, using coordinate estimate', error);
+  }
+
   const directDistanceKm = getHaversineDistanceKm(
     pickupLatitude,
     pickupLongitude,
@@ -3354,16 +3347,10 @@ function getCoordinateFallbackPriceQuote(formData: BookingFormData): FixedRouteP
     dropoffLongitude
   );
   const estimatedRoadKm = Math.max(1, directDistanceKm * 1.25);
-  const sedanPrice = Math.max(250, Math.round(estimatedRoadKm * 16));
 
   return {
-    pickupCity: normalizeRouteLabel(pickupLocation),
-    dropoffCity: normalizeRouteLabel(dropoffLocation),
-    sedanPrice,
-    suvMarkup: 1000,
-    routeId: null,
-    priceSource: 'coordinate',
-    tripOverrideId: null,
+    distanceKm: Number(estimatedRoadKm.toFixed(1)),
+    durationMinutes: null,
   };
 }
 

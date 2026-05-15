@@ -56,7 +56,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       if (existingBooking.driverId && (parsed.data.status === 'ASSIGNED' || parsed.data.status === 'ACTIVE')) {
         await tx.driver.update({
           where: { id: existingBooking.driverId },
-          data: { availabilityStatus: 'BUSY' },
+          data: { dutyStatus: 'ON_TRIP', availabilityStatus: 'BUSY' },
         });
       }
 
@@ -97,7 +97,7 @@ async function releaseDriverIfIdle(
   if (!remainingTrip) {
     await tx.driver.update({
       where: { id: driverId },
-      data: { availabilityStatus: 'AVAILABLE' },
+      data: { dutyStatus: 'ONLINE', availabilityStatus: 'AVAILABLE' },
     });
   }
 }

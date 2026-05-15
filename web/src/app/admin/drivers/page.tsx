@@ -40,7 +40,7 @@ export default async function DriversPage() {
   try {
     drivers = await prisma.driver.findMany({
       select: driverRecordSelect,
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      orderBy: [{ status: 'asc' }, { fullName: 'asc' }],
     });
   } catch (error) {
     console.error('Failed to load drivers:', error);
@@ -75,9 +75,9 @@ export default async function DriversPage() {
           <AdminStatsGrid className="xl:grid-cols-4">
             {[
               ['Total Drivers', serializedDrivers.length],
-              ['Available', serializedDrivers.filter((driver) => driver.isActive && driver.availabilityStatus === 'AVAILABLE').length],
+              ['Online', serializedDrivers.filter((driver) => driver.status === 'ACTIVE' && driver.dutyStatus === 'ONLINE').length],
               ['Assigned / On Trip', serializedBookings.length],
-              ['Vendors', serializedDrivers.filter((driver) => driver.driverType === 'VENDOR').length],
+              ['Vendors', serializedDrivers.filter((driver) => driver.driverType === 'VENDOR_DRIVER').length],
             ].map(([label, value]) => (
               <AdminStatCard key={label} label={label} value={value} />
             ))}

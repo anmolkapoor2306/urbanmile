@@ -1,139 +1,60 @@
-import { CarType, DriverAvailability, DriverType, PrismaClient } from '@prisma/client';
+import { CarType, DriverDutyStatus, DriverStatus, DriverType, PrismaClient } from '@prisma/client';
 import { generateDriverCode } from '../src/lib/driverCode';
+import { hashPassword } from '../src/lib/password';
 
 const prisma = new PrismaClient();
-const SEED_MARKER = 'DEMO_TEST_DRIVER_SEED_V1';
-const TARGET_DRIVER_COUNT = 30;
-
-type DriverPlan = {
-  index: number;
-  name: string;
-  phone: string;
-  email: string;
-  vehicleType: CarType;
-  vehicleNumber: string;
-  driverType: DriverType;
-  availabilityStatus: DriverAvailability;
-};
-
-const driverNames = [
-  'Gurpreet Singh',
-  'Harpreet Gill',
-  'Manpreet Sandhu',
-  'Jaspreet Brar',
-  'Ravinder Kumar',
-  'Sukhwinder Singh',
-  'Baljinder Singh',
-  'Amandeep Kaur',
-  'Parminder Singh',
-  'Kuldeep Singh',
-  'Satnam Singh',
-  'Rajinder Pal',
-  'Vikramjit Singh',
-  'Navdeep Sharma',
-  'Sandeep Kumar',
-  'Harmanpreet Singh',
-  'Davinder Singh',
-  'Karanbir Singh',
-  'Lovepreet Singh',
-  'Amritpal Singh',
-  'Mandeep Gill',
-  'Tejinder Singh',
-  'Rupinder Kaur',
-  'Jagdeep Singh',
-  'Varun Malhotra',
-  'Nitin Batra',
-  'Rakesh Kumar',
-  'Deepak Arora',
-  'Mohit Saini',
-  'Surinder Singh',
-];
-
-function buildPlans(): DriverPlan[] {
-  return driverNames.map((name, index) => {
-    const suffix = String(index + 1).padStart(2, '0');
-    const vehicleType = index % 3 === 0 ? CarType.SUV : CarType.SEDAN;
-
-    return {
-      index,
-      name,
-      phone: `91111${String(30000 + index).slice(-5)}`,
-      email: `urbanmile.driver.${suffix}@example.com`,
-      vehicleType,
-      vehicleNumber: `PB08-DEMO-${suffix}`,
-      driverType: index % 5 === 0 ? DriverType.THIRD_PARTY : DriverType.OWN,
-      availabilityStatus: index >= 24 ? DriverAvailability.OFFLINE : DriverAvailability.AVAILABLE,
-    };
-  });
-}
-
-function noteForIndex(index: number) {
-  return `${SEED_MARKER}:index=${String(index + 1).padStart(2, '0')}`;
-}
+const DEMO_EMAIL = 'demo.driver@urbanmiles.local';
+const DEMO_PHONE = '+91 99155 60404';
 
 async function main() {
-  const existingSeedDrivers = await prisma.driver.findMany({
+  const existing = await prisma.driver.findFirst({
     where: {
-      notes: {
-        startsWith: SEED_MARKER,
-      },
+      OR: [{ email: DEMO_EMAIL }, { phone: DEMO_PHONE }],
     },
     select: {
-      notes: true,
       driverCode: true,
-      name: true,
-    },
-    orderBy: {
-      name: 'asc',
+      fullName: true,
+      email: true,
+      phone: true,
     },
   });
 
-  if (existingSeedDrivers.length > TARGET_DRIVER_COUNT) {
-    throw new Error(
-      `Found ${existingSeedDrivers.length} ${SEED_MARKER} drivers. Refusing to add more because the seed set is already over ${TARGET_DRIVER_COUNT}.`
-    );
-  }
-
-  const existingIndexes = new Set(
-    existingSeedDrivers
-      .map((driver) => driver.notes?.match(/index=(\d+)/)?.[1])
-      .filter((value): value is string => Boolean(value))
-      .map((value) => Number(value) - 1)
-  );
-  const missingPlans = buildPlans().filter((plan) => !existingIndexes.has(plan.index));
-
-  if (missingPlans.length === 0) {
-    console.log(`No changes. ${TARGET_DRIVER_COUNT} ${SEED_MARKER} drivers already exist.`);
+  if (existing) {
+    console.log(`Demo driver already exists: ${existing.driverCode ?? 'DRV-0000'} · ${existing.fullName || existing.email || existing.phone}`);
     return;
   }
 
-  for (const plan of missingPlans) {
-    await prisma.driver.create({
-      data: {
-        driverCode: await generateDriverCode(prisma, plan.driverType),
-        name: plan.name,
-        phone: plan.phone,
-        email: plan.email,
-        vehicleType: plan.vehicleType,
-        vehicleNumber: plan.vehicleNumber,
-        isActive: true,
-        driverType: plan.driverType,
-        availabilityStatus: plan.availabilityStatus,
-        licenseInfo: `DL-PB08-DEMO-${String(plan.index + 1).padStart(4, '0')}`,
-        notes: noteForIndex(plan.index),
-      },
-    });
-  }
+  const passwordHash = await hashPassword('Driver@123');
 
-  const totalSeedDrivers = await prisma.driver.count({
-    where: {
-      notes: {
-        startsWith: SEED_MARKER,
-      },
+  const driver = await prisma.driver.create({
+    data: {
+      driverCode: await generateDriverCode(prisma),
+      fullName: 'UrbanMiles Demo Driver',
+      name: 'UrbanMiles Demo Driver',
+      email: DEMO_EMAIL,
+      phone: DEMO_PHONE,
+      passwordHash,
+      status: DriverStatus.ACTIVE,
+      dutyStatus: DriverDutyStatus.OFFLINE,
+      isActive: true,
+      driverType: DriverType.OWN_DRIVER,
+      availabilityStatus: 'OFFLINE',
+      vehicleType: CarType.SEDAN,
+      vehicleNumber: 'PB08-DEMO-01',
+      licenseInfo: 'DL-PB08-DEMO-0001',
+      notes: 'Manual demo driver for admin testing. Remove when no longer needed.',
+    },
+    select: {
+      driverCode: true,
+      fullName: true,
+      email: true,
+      phone: true,
     },
   });
 
-  console.log(`Created ${missingPlans.length} drivers. ${totalSeedDrivers}/${TARGET_DRIVER_COUNT} ${SEED_MARKER} drivers now exist.`);
+  console.log(`Created demo driver: ${driver.driverCode} · ${driver.fullName}`);
+  console.log(`Login: ${driver.email} or ${driver.phone}`);
+  console.log('Password: Driver@123');
 }
 
 main()

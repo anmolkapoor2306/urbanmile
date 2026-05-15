@@ -105,6 +105,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         pickupLatitude: true,
         pickupLongitude: true,
         dropoffLocation: true,
+        dropoffLatitude: true,
+        dropoffLongitude: true,
         pickupDateTime: true,
         carType: true,
         fareAmount: true,
@@ -129,6 +131,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         pickupLatitude: booking.pickupLatitude,
         pickupLongitude: booking.pickupLongitude,
         dropoffLocation: booking.dropoffLocation,
+        dropoffLatitude: booking.dropoffLatitude,
+        dropoffLongitude: booking.dropoffLongitude,
         carType: parsed.data.carType ?? booking.carType,
         bookingMode: 'ONE_WAY',
       });
@@ -149,15 +153,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         assignmentType = null;
       } else {
         const driver = await prisma.driver.findFirst({
-          where: { id: parsed.data.driverId, isActive: true },
-          select: { id: true, driverType: true, availabilityStatus: true },
+          where: {
+            id: parsed.data.driverId,
+            status: 'ACTIVE',
+            dutyStatus: 'ONLINE',
+          },
+          select: { id: true, driverType: true, dutyStatus: true },
         });
 
         if (!driver) {
-          return NextResponse.json({ error: 'Only active drivers can be assigned' }, { status: 400 });
+          return NextResponse.json({ error: 'Only active online drivers can be assigned' }, { status: 400 });
         }
 
-        if (driver.availabilityStatus !== 'AVAILABLE' && driver.id !== booking.driverId) {
+        if (driver.dutyStatus !== 'ONLINE' && driver.id !== booking.driverId) {
           return NextResponse.json({ error: 'This driver is not available for assignment' }, { status: 400 });
         }
 
@@ -182,7 +190,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
         data.driverId = driver.id;
         data.assignedAt = new Date();
-        assignmentType = driver.driverType === 'OWN' ? 'OWN_DRIVER' : 'OUTSOURCED_DRIVER';
+        assignmentType = driver.driverType === 'OWN' || driver.driverType === 'OWN_DRIVER' ? 'OWN_DRIVER' : 'OUTSOURCED_DRIVER';
         assignedDriverId = driver.id;
       }
     }
@@ -291,7 +299,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       if (assignedDriverId) {
         await tx.driver.update({
           where: { id: assignedDriverId },
-          data: { availabilityStatus: 'BUSY' },
+          data: { dutyStatus: 'ON_TRIP', availabilityStatus: 'BUSY' },
         });
       }
 
@@ -306,7 +314,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       if ((updated.status === 'ASSIGNED' || updated.status === 'ACTIVE') && activeDriverId) {
         await tx.driver.update({
           where: { id: activeDriverId },
-          data: { availabilityStatus: 'BUSY' },
+          data: { dutyStatus: 'ON_TRIP', availabilityStatus: 'BUSY' },
         });
       }
 
@@ -339,7 +347,7 @@ async function releaseDriverIfIdle(
   if (!remainingTrip) {
     await tx.driver.update({
       where: { id: driverId },
-      data: { availabilityStatus: 'AVAILABLE' },
+      data: { dutyStatus: 'ONLINE', availabilityStatus: 'AVAILABLE' },
     });
   }
 }

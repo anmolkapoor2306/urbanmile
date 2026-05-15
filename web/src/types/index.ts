@@ -18,7 +18,7 @@ export interface BookingFormData {
   dropoffLocation: string;
   pickupDateTime: string;
   bookingMode?: 'ONE_WAY' | 'ROUND_TRIP';
-  carType: 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
+  carType: 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY' | 'PREMIUM';
   fareAmount?: number | null;
   specialInstructions?: string;
   pickupLatitude?: number | null;
@@ -32,8 +32,8 @@ export interface BookingFormData {
 }
 
 export type BookingStatus = 'NEEDS_ASSIGNMENT' | 'ASSIGNED' | 'ACTIVE' | 'COMPLETE' | 'CANCELLED';
-export type CarType = 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY';
-export type DriverType = 'OWN' | 'THIRD_PARTY' | 'VENDOR';
+export type CarType = 'SEDAN' | 'SUV' | 'VAN' | 'LUXURY' | 'PREMIUM';
+export type DriverType = 'OWN' | 'THIRD_PARTY' | 'VENDOR' | 'OWN_DRIVER' | 'VENDOR_DRIVER';
 export type PaymentStatus = 'UNPAID' | 'PAID' | 'PENDING' | 'REFUNDED' | 'PARTIAL';
 
 export type Booking = {
@@ -79,10 +79,15 @@ export type Booking = {
 export interface Driver {
   id: string;
   name: string;
+  fullName?: string;
   phone: string;
   email?: string | null;
   driverType: DriverType;
+  status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  dutyStatus?: 'ONLINE' | 'OFFLINE' | 'BREAK' | 'ON_TRIP';
   availabilityStatus?: 'AVAILABLE' | 'BUSY' | 'OFFLINE';
+  vehicleType?: CarType | null;
+  vehicleNumber?: string | null;
   licenseInfo?: string | null;
   notes?: string | null;
 }

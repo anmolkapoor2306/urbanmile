@@ -1,5 +1,5 @@
 export const BOOKING_STATUSES = ['NEEDS_ASSIGNMENT', 'ASSIGNED', 'ACTIVE', 'COMPLETE', 'CANCELLED'] as const;
-export const DRIVER_TYPES = ['OWN', 'THIRD_PARTY', 'VENDOR'] as const;
+export const DRIVER_TYPES = ['OWN_DRIVER', 'VENDOR_DRIVER', 'OWN', 'THIRD_PARTY', 'VENDOR'] as const;
 export const PAYMENT_STATUSES = ['UNPAID', 'PAID', 'PENDING', 'REFUNDED', 'PARTIAL'] as const;
 export const ASSIGNMENT_TYPES = ['OWN_DRIVER', 'OUTSOURCED_DRIVER', 'MANUAL_OUTSOURCED'] as const;
 
@@ -32,6 +32,8 @@ export function getBookingStatusLabel(status: BookingStatusValue): string {
 
 export function getDriverTypeLabel(driverType: DriverTypeValue): string {
   const labelMap: Record<DriverTypeValue, string> = {
+    OWN_DRIVER: 'Own Driver',
+    VENDOR_DRIVER: 'Vendor Driver',
     OWN: 'Own Driver',
     THIRD_PARTY: 'Third Party Driver',
     VENDOR: 'Vendor / Company',

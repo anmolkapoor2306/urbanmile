@@ -10,6 +10,7 @@
     "lint": "eslint",
     "seed:test-bookings": "jiti scripts/seed-test-bookings.ts",
     "seed:demo-drivers": "jiti scripts/seed-demo-drivers.ts",
+    "drivers:cleanup-demo": "jiti scripts/cleanup-demo-drivers.ts",
     "seed:outstation-routes": "jiti scripts/seed-outstation-routes.ts",
     "seed:operational-zones": "jiti scripts/seed-operational-zones.ts",
     "seed": "jiti scripts/seed-admin.ts"
