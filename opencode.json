@@ -1,11 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
+
   "provider": {
     "ollama": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama Local",
       "options": {
-        "baseURL": "https://llm.atomcloud.space/v1"
+        "baseURL": "http://192.168.1.212:11434/v1"
       },
       "models": {
         "qwen3.6:27b-96k": {
@@ -14,13 +15,22 @@
       }
     }
   },
+
   "model": "ollama/qwen3.6:27b-96k",
+
   "permission": {
     "edit": "allow",
     "bash": "allow",
     "read": "allow",
     "webfetch": "ask"
   },
+
+  "compaction": {
+    "auto": true,
+    "prune": false,
+    "reserved": 20000
+  },
+
   "instructions": [
     "AGENTS.md"
   ]
